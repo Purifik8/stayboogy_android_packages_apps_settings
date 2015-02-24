@@ -127,6 +127,7 @@ public class PerformanceSettings extends SettingsPreferenceFragment implements
             category.removePreference(findPreference(FORCE_HIGHEND_GFX_PREF));
         }
 
+
     }
 
     @Override
