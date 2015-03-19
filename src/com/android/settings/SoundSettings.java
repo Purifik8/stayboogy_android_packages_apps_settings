@@ -16,10 +16,8 @@
 
 package com.android.settings;
 
-import android.content.ComponentName;
-import android.telephony.MSimTelephonyManager;
 import com.android.settings.bluetooth.DockEventReceiver;
-import com.android.settings.hardware.VibratorIntensity;
+import com.android.settings.Utils;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -28,6 +26,7 @@ import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
@@ -60,7 +59,7 @@ import java.util.Calendar;
 import java.util.List;
 
 public class SoundSettings extends SettingsPreferenceFragment implements
-        Preference.OnPreferenceChangeListener, Preference.OnPreferenceClickListener {
+        Preference.OnPreferenceChangeListener, DialogInterface.OnDismissListener, DialogInterface.OnClickListener {
     private static final String TAG = "SoundSettings";
 
     private static final int DIALOG_NOT_DOCKED = 1;
@@ -74,13 +73,12 @@ public class SoundSettings extends SettingsPreferenceFragment implements
     private static final String KEY_RING_VOLUME = "ring_volume";
     private static final String KEY_INCREASING_RING = "increasing_ring";
     private static final String KEY_MUSICFX = "musicfx";
-    private static final String KEY_DTMF_TONE = Settings.System.DTMF_TONE_WHEN_DIALING;
-    private static final String KEY_SOUND_EFFECTS = Settings.System.SOUND_EFFECTS_ENABLED;
-    private static final String KEY_HAPTIC_FEEDBACK = Settings.System.HAPTIC_FEEDBACK_ENABLED;
-    private static final String KEY_VIBRATION_INTENSITY = "vibration_intensity";
+    private static final String KEY_DTMF_TONE = "dtmf_tone";
+    private static final String KEY_SOUND_EFFECTS = "sound_effects";
+    private static final String KEY_HAPTIC_FEEDBACK = "haptic_feedback";
     private static final String KEY_EMERGENCY_TONE = "emergency_tone";
     private static final String KEY_SOUND_SETTINGS = "sound_settings";
-    private static final String KEY_LOCK_SOUNDS = Settings.System.LOCKSCREEN_SOUNDS_ENABLED;
+    private static final String KEY_LOCK_SOUNDS = "lock_sounds";
     private static final String KEY_RINGTONE = "ringtone";
     private static final String KEY_NOTIFICATION_SOUND = "notification_sound";
     private static final String KEY_CATEGORY_CALLS = "category_calls_and_notification";
@@ -89,11 +87,12 @@ public class SoundSettings extends SettingsPreferenceFragment implements
     private static final String KEY_DOCK_SOUNDS = "dock_sounds";
     private static final String KEY_DOCK_AUDIO_MEDIA_ENABLED = "dock_audio_media_enabled";
     private static final String KEY_QUIET_HOURS = "quiet_hours";
-    private static final String KEY_CONVERT_SOUND_TO_VIBRATE =
-            Settings.System.NOTIFICATION_CONVERT_SOUND_TO_VIBRATION;
-    private static final String KEY_VIBRATE_DURING_CALLS =
-            Settings.System.NOTIFICATION_VIBRATE_DURING_ALERTS_DISABLED;
-    private static final String KEY_VOLUME_ADJUST_SOUNDS = "volume_adjust_sounds_enabled";
+    private static final String KEY_VOLBTN_MUSIC_CTRL = "volbtn_music_controls";
+    private static final String KEY_HEADSET_CONNECT_PLAYER = "headset_connect_player";
+    private static final String KEY_CONVERT_SOUND_TO_VIBRATE = "notification_convert_sound_to_vibration";
+    private static final String KEY_VIBRATE_DURING_CALLS = "notification_vibrate_during_calls";
+    private static final String KEY_SAFE_HEADSET_VOLUME = "safe_headset_volume";
+    private static final String KEY_VOLUME_ADJUST_SOUNDS = "volume_adjust_sounds";
     private static final String KEY_POWER_NOTIFICATIONS = "power_notifications";
     private static final String KEY_POWER_NOTIFICATIONS_VIBRATE = "power_notifications_vibrate";
     private static final String KEY_POWER_NOTIFICATIONS_RINGTONE = "power_notifications_ringtone";
@@ -104,8 +103,7 @@ public class SoundSettings extends SettingsPreferenceFragment implements
 
     private static final String[] NEED_VOICE_CAPABILITY = {
             KEY_RINGTONE, KEY_DTMF_TONE, KEY_CATEGORY_CALLS,
-            KEY_EMERGENCY_TONE, KEY_INCREASING_RING, KEY_VIBRATE,
-            KEY_VOLUME_ADJUST_SOUNDS, KEY_VIBRATE_DURING_CALLS
+            KEY_EMERGENCY_TONE, KEY_INCREASING_RING, KEY_VIBRATE
     };
 
     private static final int MSG_UPDATE_RINGTONE_SUMMARY = 1;
@@ -117,13 +115,23 @@ public class SoundSettings extends SettingsPreferenceFragment implements
     // Used for power notification uri string if set to silent
     private static final String POWER_NOTIFICATIONS_SILENT_URI = "silent";
 
+    private CheckBoxPreference mVibrateWhenRinging;
     private ListPreference mVolumeOverlay;
     private ListPreference mRingMode;
+    private CheckBoxPreference mDtmfTone;
     private CheckBoxPreference mSoundEffects;
+    private CheckBoxPreference mHapticFeedback;
+    private CheckBoxPreference mVolumeAdjustSounds;
     private Preference mMusicFx;
+    private CheckBoxPreference mLockSounds;
+    private CheckBoxPreference mVolBtnMusicCtrl;
+    private CheckBoxPreference mHeadsetConnectPlayer;
+    private CheckBoxPreference mConvertSoundToVibration;
+    private CheckBoxPreference mVibrateDuringCalls;
     private Preference mRingtonePreference;
     private Preference mNotificationPreference;
     private PreferenceScreen mQuietHours;
+    private CheckBoxPreference mSafeHeadsetVolume;
 
     private Runnable mRingtoneLookupRunnable;
 
@@ -136,8 +144,11 @@ public class SoundSettings extends SettingsPreferenceFragment implements
 
     private CheckBoxPreference mPowerSounds;
     private CheckBoxPreference mPowerSoundsVibrate;
-    private MSimTelephonyManager mSimTelephonyManager;
     private Preference mPowerSoundsRingtone;
+
+    // To track whether a confirmation dialog was clicked.
+    private boolean mDialogClicked;
+    private Dialog mWaiverDialog;
 
     private Handler mHandler = new Handler() {
         public void handleMessage(Message msg) {
@@ -172,14 +183,6 @@ public class SoundSettings extends SettingsPreferenceFragment implements
         int activePhoneType = TelephonyManager.getDefault().getCurrentPhoneType();
 
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        mSimTelephonyManager =
-                (MSimTelephonyManager) getSystemService(Context.MSIM_TELEPHONY_SERVICE);
-
-        if (mSimTelephonyManager.isMultiSimEnabled()) {
-            addPreferencesFromResource(R.xml.msim_ringtone_settings);
-        } else {
-            addPreferencesFromResource(R.xml.ringtone_settings);
-        }
 
         addPreferencesFromResource(R.xml.sound_settings);
 
@@ -204,19 +207,77 @@ public class SoundSettings extends SettingsPreferenceFragment implements
             mRingMode.setOnPreferenceChangeListener(this);
         }
 
-        if (getResources().getBoolean(com.android.internal.R.bool.config_useFixedVolume)) {
-            // device with fixed volume policy, do not display volumes submenu
-            getPreferenceScreen().removePreference(findPreference(KEY_RING_VOLUME));
-        }
-
         mQuietHours = (PreferenceScreen) findPreference(KEY_QUIET_HOURS);
-        updateQuietHoursSummary();
-
-        mSoundEffects = (CheckBoxPreference) findPreference(KEY_SOUND_EFFECTS);
-
-        if (!Utils.hasVolumeRocker(getActivity())) {
-            getPreferenceScreen().removePreference(findPreference(KEY_VOLUME_ADJUST_SOUNDS));
+        if (Settings.System.getInt(resolver, Settings.System.QUIET_HOURS_ENABLED, 0) == 1) {
+            mQuietHours.setSummary(getString(R.string.quiet_hours_active_from) + " " +
+                    returnTime(Settings.System.getString(resolver, Settings.System.QUIET_HOURS_START))
+                    + " " + getString(R.string.quiet_hours_active_to) + " " +
+                    returnTime(Settings.System.getString(resolver, Settings.System.QUIET_HOURS_END)));
+        } else {
+            mQuietHours.setSummary(getString(R.string.quiet_hours_summary));
         }
+
+        mSafeHeadsetVolume = (CheckBoxPreference) findPreference(KEY_SAFE_HEADSET_VOLUME);
+        mSafeHeadsetVolume.setPersistent(false);
+        boolean safeMediaVolumeEnabled = getResources().getBoolean(
+                com.android.internal.R.bool.config_safe_media_volume_enabled);
+        mSafeHeadsetVolume.setChecked(Settings.System.getInt(resolver,
+                Settings.System.SAFE_HEADSET_VOLUME, safeMediaVolumeEnabled ? 1 : 0) != 0);
+
+        mVibrateWhenRinging = (CheckBoxPreference) findPreference(KEY_VIBRATE);
+        mVibrateWhenRinging.setPersistent(false);
+        mVibrateWhenRinging.setChecked(Settings.System.getInt(resolver,
+                Settings.System.VIBRATE_WHEN_RINGING, 0) != 0);
+
+        mDtmfTone = (CheckBoxPreference) findPreference(KEY_DTMF_TONE);
+        mDtmfTone.setPersistent(false);
+        mDtmfTone.setChecked(Settings.System.getInt(resolver,
+                Settings.System.DTMF_TONE_WHEN_DIALING, 1) != 0);
+        mSoundEffects = (CheckBoxPreference) findPreference(KEY_SOUND_EFFECTS);
+        mSoundEffects.setPersistent(false);
+        mSoundEffects.setChecked(Settings.System.getInt(resolver,
+                Settings.System.SOUND_EFFECTS_ENABLED, 1) != 0);
+        mHapticFeedback = (CheckBoxPreference) findPreference(KEY_HAPTIC_FEEDBACK);
+        mHapticFeedback.setPersistent(false);
+        mHapticFeedback.setChecked(Settings.System.getInt(resolver,
+                Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) != 0);
+        mVolumeAdjustSounds = (CheckBoxPreference) findPreference(KEY_VOLUME_ADJUST_SOUNDS);
+        if (mVolumeAdjustSounds != null) {
+            if (!Utils.hasVolumeRocker(getActivity())) {
+                getPreferenceScreen().removePreference(mVolumeAdjustSounds);
+            } else {
+                mVolumeAdjustSounds.setChecked(Settings.System.getInt(resolver,
+                        Settings.System.VOLUME_ADJUST_SOUNDS_ENABLED, 1) != 0);
+            }
+        }
+        mLockSounds = (CheckBoxPreference) findPreference(KEY_LOCK_SOUNDS);
+        mLockSounds.setPersistent(false);
+        mLockSounds.setChecked(Settings.System.getInt(resolver,
+                Settings.System.LOCKSCREEN_SOUNDS_ENABLED, 1) != 0);
+
+        mVolBtnMusicCtrl = (CheckBoxPreference) findPreference(KEY_VOLBTN_MUSIC_CTRL);
+        if (mVolBtnMusicCtrl != null) {
+            if (!Utils.hasVolumeRocker(getActivity())) {
+                getPreferenceScreen().removePreference(mVolBtnMusicCtrl);
+            } else {
+                mVolBtnMusicCtrl.setChecked(Settings.System.getInt(resolver,
+                        Settings.System.VOLBTN_MUSIC_CONTROLS, 1) != 0);
+            }
+        }
+
+        mHeadsetConnectPlayer = (CheckBoxPreference) findPreference(KEY_HEADSET_CONNECT_PLAYER);
+        mHeadsetConnectPlayer.setChecked(Settings.System.getInt(resolver,
+                Settings.System.HEADSET_CONNECT_PLAYER, 0) != 0);
+
+        mConvertSoundToVibration = (CheckBoxPreference) findPreference(KEY_CONVERT_SOUND_TO_VIBRATE);
+
+        mConvertSoundToVibration.setPersistent(false);
+        mConvertSoundToVibration.setChecked(Settings.System.getInt(resolver,
+                Settings.System.NOTIFICATION_CONVERT_SOUND_TO_VIBRATION, 1) != 0);
+
+        mVibrateDuringCalls = (CheckBoxPreference) findPreference(KEY_VIBRATE_DURING_CALLS);
+        mVibrateDuringCalls.setChecked(Settings.System.getInt(resolver,
+                Settings.System.NOTIFICATION_VIBRATE_DURING_ALERTS_DISABLED, 0) != 0);
 
         mRingtonePreference = findPreference(KEY_RINGTONE);
         mNotificationPreference = findPreference(KEY_NOTIFICATION_SOUND);
@@ -225,11 +286,8 @@ public class SoundSettings extends SettingsPreferenceFragment implements
         if (vibrator == null || !vibrator.hasVibrator()) {
             removePreference(KEY_VIBRATE);
             removePreference(KEY_HAPTIC_FEEDBACK);
-            removePreference(KEY_VIBRATION_INTENSITY);
             removePreference(KEY_CONVERT_SOUND_TO_VIBRATE);
             removePreference(KEY_VIBRATE_DURING_CALLS);
-        } else if (!VibratorIntensity.isSupported()) {
-            removePreference(KEY_VIBRATION_INTENSITY);
         }
 
         if (TelephonyManager.PHONE_TYPE_CDMA == activePhoneType) {
@@ -246,7 +304,7 @@ public class SoundSettings extends SettingsPreferenceFragment implements
         Intent i = new Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL);
         mMusicFx.setIntent(i);
         PackageManager p = getPackageManager();
-        List<ResolveInfo> ris = p.queryIntentActivities(i, 0);
+        List<ResolveInfo> ris = p.queryIntentActivities(i, PackageManager.GET_DISABLED_COMPONENTS);
         if (ris.size() == 0) {
             mSoundSettings.removePreference(mMusicFx);
         } else if (ris.size() == 1) {
@@ -260,17 +318,11 @@ public class SoundSettings extends SettingsPreferenceFragment implements
                     getPreferenceScreen().removePreference(pref);
                 }
             }
-            mRingtonePreference = null;
-        }
-
-        // Set a new onclick listener if our preference is inherited from msim_ringtone_settings
-        if (mRingtonePreference != null && mSimTelephonyManager.isMultiSimEnabled()) {
-            mRingtonePreference.setOnPreferenceClickListener(this);
         }
 
         mRingtoneLookupRunnable = new Runnable() {
             public void run() {
-                if (!mSimTelephonyManager.isMultiSimEnabled() && mRingtonePreference != null) {
+                if (mRingtonePreference != null) {
                     updateRingtoneName(RingtoneManager.TYPE_RINGTONE, mRingtonePreference,
                             MSG_UPDATE_RINGTONE_SUMMARY);
                 }
@@ -280,6 +332,8 @@ public class SoundSettings extends SettingsPreferenceFragment implements
                 }
             }
         };
+
+        initDockSettings();
 
         // power state change notification sounds
         mPowerSounds = (CheckBoxPreference) findPreference(KEY_POWER_NOTIFICATIONS);
@@ -314,7 +368,6 @@ public class SoundSettings extends SettingsPreferenceFragment implements
             }
         }
 
-        initDockSettings();
     }
 
     @Override
@@ -329,13 +382,11 @@ public class SoundSettings extends SettingsPreferenceFragment implements
 
         filter = new IntentFilter(AudioManager.RINGER_MODE_CHANGED_ACTION);
         getActivity().registerReceiver(mReceiver, filter);
-
     }
 
     @Override
     public void onPause() {
         super.onPause();
-
         getActivity().unregisterReceiver(mReceiver);
     }
 
@@ -365,22 +416,20 @@ public class SoundSettings extends SettingsPreferenceFragment implements
     // updateState in fact updates the UI to reflect the system state
     private void updateState(boolean force) {
         if (getActivity() == null) return;
+        ContentResolver resolver = getContentResolver();
 
         mRingMode.setValue(getPhoneRingModeSettingValue());
-        mRingMode.setSummary(mRingMode.getEntry());
-        updateQuietHoursSummary();
-    }
 
-    private void updateQuietHoursSummary() {
-        ContentResolver resolver = getContentResolver();
         if (Settings.System.getInt(resolver, Settings.System.QUIET_HOURS_ENABLED, 0) == 1) {
-            String start = Settings.System.getString(resolver, Settings.System.QUIET_HOURS_START);
-            String end = Settings.System.getString(resolver, Settings.System.QUIET_HOURS_END);
-            mQuietHours.setSummary(getString(R.string.quiet_hours_active_period,
-                    returnTime(start), returnTime(end)));
+            mQuietHours.setSummary(getString(R.string.quiet_hours_active_from) + " " +
+                    returnTime(Settings.System.getString(resolver, Settings.System.QUIET_HOURS_START))
+                    + " " + getString(R.string.quiet_hours_active_to) + " " +
+                    returnTime(Settings.System.getString(resolver, Settings.System.QUIET_HOURS_END)));
         } else {
             mQuietHours.setSummary(getString(R.string.quiet_hours_summary));
         }
+
+        mRingMode.setSummary(mRingMode.getEntry());
     }
 
     private void updateRingtoneName(int type, Preference preference, int msg) {
@@ -416,16 +465,48 @@ public class SoundSettings extends SettingsPreferenceFragment implements
 
     @Override
     public boolean onPreferenceTreeClick(PreferenceScreen preferenceScreen, Preference preference) {
-        if (preference == mSoundEffects) {
+        if (preference == mVibrateWhenRinging) {
+            Settings.System.putInt(getContentResolver(), Settings.System.VIBRATE_WHEN_RINGING,
+                    mVibrateWhenRinging.isChecked() ? 1 : 0);
+
+        } else if (preference == mDtmfTone) {
+            Settings.System.putInt(getContentResolver(), Settings.System.DTMF_TONE_WHEN_DIALING,
+                    mDtmfTone.isChecked() ? 1 : 0);
+
+        } else if (preference == mSoundEffects) {
             if (mSoundEffects.isChecked()) {
                 mAudioManager.loadSoundEffects();
             } else {
                 mAudioManager.unloadSoundEffects();
             }
+            Settings.System.putInt(getContentResolver(), Settings.System.SOUND_EFFECTS_ENABLED,
+                    mSoundEffects.isChecked() ? 1 : 0);
+
+        } else if (preference == mHapticFeedback) {
+            Settings.System.putInt(getContentResolver(), Settings.System.HAPTIC_FEEDBACK_ENABLED,
+                    mHapticFeedback.isChecked() ? 1 : 0);
+
+        } else if (preference == mVolumeAdjustSounds) {
+            Settings.System.putInt(getContentResolver(), Settings.System.VOLUME_ADJUST_SOUNDS_ENABLED,
+                    mVolumeAdjustSounds.isChecked() ? 1 : 0);
+
+        } else if (preference == mLockSounds) {
+            Settings.System.putInt(getContentResolver(), Settings.System.LOCKSCREEN_SOUNDS_ENABLED,
+                    mLockSounds.isChecked() ? 1 : 0);
+
+        } else if (preference == mConvertSoundToVibration) {
+            Settings.System.putInt(getContentResolver(), Settings.System.NOTIFICATION_CONVERT_SOUND_TO_VIBRATION,
+                    mConvertSoundToVibration.isChecked() ? 1 : 0);
+
+        } else if (preference == mVibrateDuringCalls) {
+            Settings.System.putInt(getContentResolver(),
+                    Settings.System.NOTIFICATION_VIBRATE_DURING_ALERTS_DISABLED,
+                    mVibrateDuringCalls.isChecked() ? 1 : 0);
 
         } else if (preference == mMusicFx) {
             // let the framework fire off the intent
             return false;
+
         } else if (preference == mDockAudioSettings) {
             int dockState = mDockIntent != null
                     ? mDockIntent.getIntExtra(Intent.EXTRA_DOCK_STATE, 0)
@@ -450,12 +531,41 @@ public class SoundSettings extends SettingsPreferenceFragment implements
                     super.onPreferenceTreeClick(ps, ps);
                 }
             }
+
         } else if (preference == mDockSounds) {
             Settings.Global.putInt(getContentResolver(), Settings.Global.DOCK_SOUNDS_ENABLED,
                     mDockSounds.isChecked() ? 1 : 0);
+
         } else if (preference == mDockAudioMediaEnabled) {
             Settings.Global.putInt(getContentResolver(), Settings.Global.DOCK_AUDIO_MEDIA_ENABLED,
                     mDockAudioMediaEnabled.isChecked() ? 1 : 0);
+
+        } else if (preference == mVolBtnMusicCtrl) {
+            Settings.System.putInt(getContentResolver(), Settings.System.VOLBTN_MUSIC_CONTROLS,
+                    mVolBtnMusicCtrl.isChecked() ? 1 : 0);
+
+        } else if (preference == mHeadsetConnectPlayer) {
+            Settings.System.putInt(getContentResolver(), Settings.System.HEADSET_CONNECT_PLAYER,
+                    mHeadsetConnectPlayer.isChecked() ? 1 : 0);
+
+        } else if (preference == mSafeHeadsetVolume) {
+                if (!mSafeHeadsetVolume.isChecked()) {
+                    // User is trying to disable the feature, display the waiver
+                    mDialogClicked = false;
+                    if (mWaiverDialog != null) {
+                        dismissDialog();
+                    }
+                    mWaiverDialog = new AlertDialog.Builder(getActivity())
+                            .setMessage(R.string.cyanogenmod_waiver_body)
+                            .setTitle(R.string.cyanogenmod_waiver_title)
+                            .setPositiveButton(R.string.ok, this)
+                            .setNegativeButton(R.string.cancel, this)
+                            .show();
+                    mWaiverDialog.setOnDismissListener(this);
+                } else {
+                    Settings.System.putInt(getContentResolver(), Settings.System.SAFE_HEADSET_VOLUME, 1);
+                }
+
         } else if (preference == mPowerSounds) {
             Settings.Global.putInt(getContentResolver(),
                     Settings.Global.POWER_NOTIFICATIONS_ENABLED,
@@ -488,8 +598,10 @@ public class SoundSettings extends SettingsPreferenceFragment implements
             } catch (NumberFormatException e) {
                 Log.e(TAG, "could not persist emergency tone setting", e);
             }
+
         } else if (preference == mRingMode) {
             setPhoneRingModeValue(objValue.toString());
+
         } else if (preference == mVolumeOverlay) {
             final int value = Integer.valueOf((String) objValue);
             final int index = mVolumeOverlay.findIndexOfValue((String) objValue);
@@ -514,7 +626,7 @@ public class SoundSettings extends SettingsPreferenceFragment implements
         cal.set(Calendar.HOUR_OF_DAY, hr);
         cal.set(Calendar.MINUTE, mn);
         Date date = cal.getTime();
-        return DateFormat.getTimeFormat(getActivity()).format(date);
+        return DateFormat.getTimeFormat(getActivity().getApplicationContext()).format(date);
     }
 
     @Override
@@ -658,21 +770,36 @@ public class SoundSettings extends SettingsPreferenceFragment implements
         return ab.create();
     }
 
-    @Override
-    public boolean onPreferenceClick(Preference preference) {
-        if (preference == mRingtonePreference && mSimTelephonyManager.isMultiSimEnabled()) {
-            Intent intent = new Intent();
-            intent.setAction(Intent.ACTION_MAIN);
-            intent.putExtra("PACKAGE", "com.android.phone");
-            intent.putExtra("TARGET_CLASS",
-                    "com.android.phone.MSimCallFeaturesSubSetting");
-            intent.setComponent(new ComponentName("com.android.phone",
-                    "com.android.phone.SelectSubscription"));
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            startActivity(intent);
-            return true;
+    private void dismissDialog() {
+        if (mWaiverDialog != null) {
+            mWaiverDialog.dismiss();
+            mWaiverDialog = null;
         }
-        return false;
     }
-}
 
+    public void onClick(DialogInterface dialog, int which) {
+        if (dialog == mWaiverDialog) {
+            if (which == DialogInterface.BUTTON_POSITIVE) {
+                mDialogClicked = true;
+                Settings.System.putInt(getContentResolver(), Settings.System.SAFE_HEADSET_VOLUME, 0);
+            }
+        }
+    }
+
+    public void onDismiss(DialogInterface dialog) {
+        // Assuming that onClick gets called first
+        if (dialog == mWaiverDialog) {
+            if (!mDialogClicked) {
+                mSafeHeadsetVolume.setChecked(true);
+            }
+            mWaiverDialog = null;
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        dismissDialog();
+        super.onDestroy();
+    }
+
+}

@@ -16,7 +16,6 @@
 
 package com.android.settings.bluetooth;
 
-import android.bluetooth.BluetoothUuid;
 import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
@@ -65,33 +64,21 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
 
     private boolean mVisible;
 
-    private boolean mDeviceRemove;
-
     private int mPhonebookPermissionChoice;
-
     private int mMessagePermissionChoice;
-
-    private int mPhonebookRejectedTimes;
-
-    private int mMessageRejectedTimes;
 
     private final Collection<Callback> mCallbacks = new ArrayList<Callback>();
 
-    // Following constants indicate the user's choices of Phone book/message access settings
+    // Following constants indicate the user's choices of Phone book or MAS access settings
     // User hasn't made any choice or settings app has wiped out the memory
-    final static int ACCESS_UNKNOWN = 0;
+    final static int PERMISSION_ACCESS_UNKNOWN = 0;
     // User has accepted the connection and let Settings app remember the decision
-    final static int ACCESS_ALLOWED = 1;
+    final static int PERMISSION_ACCESS_ALLOWED = 1;
     // User has rejected the connection and let Settings app remember the decision
-    final static int ACCESS_REJECTED = 2;
-
-    // how many times did User reject the connection to make the rejected persist.
-    final static int PERSIST_REJECTED_TIMES_LIMIT = 2;
+    final static int PERMISSION_ACCESS_REJECTED = 2;
 
     private final static String PHONEBOOK_PREFS_NAME = "bluetooth_phonebook_permission";
-    private final static String MESSAGE_PREFS_NAME = "bluetooth_message_permission";
-    private final static String PHONEBOOK_REJECT_TIMES = "bluetooth_phonebook_reject";
-    private final static String MESSAGE_REJECT_TIMES = "bluetooth_message_reject";
+    private final static String MESSAGE_PREFS_NAME = "bluetooth_message_permissions";
 
     /**
      * When we connect to multiple profiles, we only want to display a single
@@ -109,8 +96,6 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
 
     // See mConnectAttempted
     private static final long MAX_UUID_DELAY_FOR_AUTO_CONNECT = 5000;
-
-    private static final long MAX_HOGP_DELAY_FOR_AUTO_CONNECT = 30000;
 
     /** Auto-connect after pairing only if locally initiated. */
     private boolean mConnectAfterPairing;
@@ -152,16 +137,6 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
                     mLocalNapRoleConnected = true;
                 }
             }
-            if (profile instanceof MapProfile) {
-                profile.setPreferred(mDevice, true);
-            }
-        } else if (profile instanceof MapProfile &&
-                newProfileState == BluetoothProfile.STATE_DISCONNECTED) {
-            if (mProfiles.contains(profile)) {
-                mRemovedProfiles.add(profile);
-                mProfiles.remove(profile);
-            }
-            profile.setPreferred(mDevice, false);
         } else if (mLocalNapRoleConnected && profile instanceof PanProfile &&
                 ((PanProfile) profile).isLocalRoleNap(mDevice) &&
                 newProfileState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -306,26 +281,15 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
     }
 
     boolean startPairing() {
-        if(mLocalAdapter.checkPairingState() == true)
-        {
-            Log.v(TAG, "Pairing is onging");
-            return true;
-        }
-
-        mLocalAdapter.setPairingState(true);
-        Log.v(TAG, "startPairing : isPairing : " + mLocalAdapter.checkPairingState());
-
         // Pairing is unreliable while scanning, so cancel discovery
         if (mLocalAdapter.isDiscovering()) {
             mLocalAdapter.cancelDiscovery();
         }
 
         if (!mDevice.createBond()) {
-            mLocalAdapter.setPairingState(false);
             return false;
         }
 
-        Log.v(TAG, "startPairing CreateBond : isPairing : " + mLocalAdapter.checkPairingState());
         mConnectAfterPairing = true;  // auto-connect after pairing
         return true;
     }
@@ -351,10 +315,8 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
                 final boolean successful = dev.removeBond();
                 if (successful) {
                     if (Utils.D) {
-                        mDevice.setAlias(null);
                         Log.d(TAG, "Command sent successfully:REMOVE_BOND " + describe(null));
                     }
-                    setRemovable(true);
                 } else if (Utils.V) {
                     Log.v(TAG, "Framework rejected command immediately:REMOVE_BOND " +
                             describe(null));
@@ -388,11 +350,8 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
         fetchName();
         fetchBtClass();
         updateProfiles();
-        fetchPhonebookPermissionChoice();
-        fetchMessagePermissionChoice();
-        fetchPhonebookRejectTimes();
-        fetchMessageRejectTimes();
-
+        mPhonebookPermissionChoice = fetchPermissionChoice(PHONEBOOK_PREFS_NAME);
+        mMessagePermissionChoice = fetchPermissionChoice(MESSAGE_PREFS_NAME);
         mVisible = false;
         dispatchAttributesChanged();
     }
@@ -411,14 +370,6 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
                 // TODO: use friendly name for unknown device (bug 1181856)
                 mName = mDevice.getAddress();
             } else {
-                mName = name;
-            }
-            dispatchAttributesChanged();
-        }
-    }
-    void setAliasName(String name) {
-        if (!mName.equals(name)) {
-            if (!TextUtils.isEmpty(name)) {
                 mName = name;
                 mDevice.setAlias(name);
             }
@@ -448,22 +399,12 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
         return mVisible;
     }
 
-    boolean isRemovable () {
-        return mDeviceRemove;
-   }
-
-
     void setVisible(boolean visible) {
         if (mVisible != visible) {
             mVisible = visible;
             dispatchAttributesChanged();
         }
     }
-
-    void setRemovable(boolean removable) {
-        mDeviceRemove = removable;
-    }
-
 
     int getBondState() {
         return mDevice.getBondState();
@@ -523,8 +464,7 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
         ParcelUuid[] localUuids = mLocalAdapter.getUuids();
         if (localUuids == null) return false;
 
-        mProfileManager.updateProfiles(uuids, localUuids, mProfiles, mRemovedProfiles,
-                                       mLocalNapRoleConnected, mDevice);
+        mProfileManager.updateProfiles(uuids, localUuids, mProfiles, mRemovedProfiles, mLocalNapRoleConnected);
 
         if (DEBUG) {
             Log.e(TAG, "updating profiles for " + mDevice.getAliasName());
@@ -553,22 +493,18 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
      */
     void onUuidChanged() {
         updateProfiles();
-        ParcelUuid[] uuids = mDevice.getUuids();
-        long timeout = MAX_UUID_DELAY_FOR_AUTO_CONNECT;
-        Log.d(TAG, "onUuidChanged: Time since last connect"
+
+        if (DEBUG) {
+            Log.e(TAG, "onUuidChanged: Time since last connect"
                     + (SystemClock.elapsedRealtime() - mConnectAttempted));
+        }
 
         /*
          * If a connect was attempted earlier without any UUID, we will do the
          * connect now.
          */
-        if(BluetoothUuid.isUuidPresent(uuids, BluetoothUuid.Hogp))
-        {
-            timeout = MAX_HOGP_DELAY_FOR_AUTO_CONNECT;
-        }
-        Log.d(TAG, "onUuidChanged timeout value="+timeout);
         if (!mProfiles.isEmpty()
-                && (mConnectAttempted + timeout) > SystemClock
+                && (mConnectAttempted + MAX_UUID_DELAY_FOR_AUTO_CONNECT) > SystemClock
                         .elapsedRealtime()) {
             connectWithoutResettingTimer(false);
         }
@@ -577,53 +513,21 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
 
     void onBondingStateChanged(int bondState) {
         if (bondState == BluetoothDevice.BOND_NONE) {
-            mLocalAdapter.setPairingState(false);
             mProfiles.clear();
             mConnectAfterPairing = false;  // cancel auto-connect
-            setPhonebookPermissionChoice(ACCESS_UNKNOWN);
-            setMessagePermissionChoice(ACCESS_UNKNOWN);
-            mPhonebookRejectedTimes = 0;
-            savePhonebookRejectTimes();
-            mMessageRejectedTimes = 0;
-            saveMessageRejectTimes();
-            Log.v(TAG,"onBondingstate none: isPairing : " + mLocalAdapter.checkPairingState());
+            setPhonebookPermissionChoice(PERMISSION_ACCESS_UNKNOWN);
+            setMessagePermissionChoice(PERMISSION_ACCESS_UNKNOWN);
         }
 
-        if(DEBUG) Log.d(TAG, "onBondingStateChanged" + bondState);
+        refresh();
 
-        switch (bondState) {
-            case BluetoothDevice.BOND_NONE:
-                mLocalAdapter.setPairingState(false);
-                mProfiles.clear();
-                mConnectAfterPairing = false;  // cancel auto-connect
-                // fall through
-
-            case BluetoothDevice.BOND_BONDING:
-                //Sometimes Remote device is unpaired by itself & try to connect again.
-                //so permission should be reset for that particular device.
-                setPhonebookPermissionChoice(ACCESS_UNKNOWN);
-                setMessagePermissionChoice(ACCESS_UNKNOWN);
-                mPhonebookRejectedTimes = 0;
-                savePhonebookRejectTimes();
-                mMessageRejectedTimes = 0;
-                saveMessageRejectTimes();
-
-                refresh();
-                break;
-
-            case BluetoothDevice.BOND_BONDED:
-                mLocalAdapter.setPairingState(false);
-                if (mDevice.isBluetoothDock()) {
-                    onBondingDockConnect();
-                } else if (mConnectAfterPairing) {
-                    connect(false);
-                }
-                mConnectAfterPairing = false;
-                Log.v(TAG,"BondState bonded: isPairing : " + mLocalAdapter.checkPairingState());
-                break;
-
-            default:
-                Log.e(TAG, "Incorrect Bond State received");
+        if (bondState == BluetoothDevice.BOND_BONDED) {
+            if (mDevice.isBluetoothDock()) {
+                onBondingDockConnect();
+            } else if (mConnectAfterPairing) {
+                connect(false);
+            }
+            mConnectAfterPairing = false;
         }
     }
 
@@ -728,72 +632,24 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
         return mPhonebookPermissionChoice;
     }
 
-    void setPhonebookPermissionChoice(int permissionChoice) {
-        // if user reject it, only save it when reject exceed limit.
-        if (permissionChoice == ACCESS_REJECTED) {
-            mPhonebookRejectedTimes++;
-            savePhonebookRejectTimes();
-            if (mPhonebookRejectedTimes < PERSIST_REJECTED_TIMES_LIMIT) {
-                return;
-            }
-        }
-
-        mPhonebookPermissionChoice = permissionChoice;
-
-        SharedPreferences.Editor editor =
-            mContext.getSharedPreferences(PHONEBOOK_PREFS_NAME, Context.MODE_PRIVATE).edit();
-        if (permissionChoice == ACCESS_UNKNOWN) {
-            editor.remove(mDevice.getAddress());
-        } else {
-            editor.putInt(mDevice.getAddress(), permissionChoice);
-        }
-        editor.commit();
-    }
-
-    private void fetchPhonebookPermissionChoice() {
-        SharedPreferences preference = mContext.getSharedPreferences(PHONEBOOK_PREFS_NAME,
-                                                                     Context.MODE_PRIVATE);
-        mPhonebookPermissionChoice = preference.getInt(mDevice.getAddress(),
-                                                       ACCESS_UNKNOWN);
-    }
-
-    private void fetchPhonebookRejectTimes() {
-        SharedPreferences preference = mContext.getSharedPreferences(PHONEBOOK_REJECT_TIMES,
-                                                                     Context.MODE_PRIVATE);
-        mPhonebookRejectedTimes = preference.getInt(mDevice.getAddress(), 0);
-    }
-
-    private void savePhonebookRejectTimes() {
-        SharedPreferences.Editor editor =
-            mContext.getSharedPreferences(PHONEBOOK_REJECT_TIMES,
-                                          Context.MODE_PRIVATE).edit();
-        if (mPhonebookRejectedTimes == 0) {
-            editor.remove(mDevice.getAddress());
-        } else {
-            editor.putInt(mDevice.getAddress(), mPhonebookRejectedTimes);
-        }
-        editor.commit();
-    }
-
     int getMessagePermissionChoice() {
         return mMessagePermissionChoice;
     }
 
+    void setPhonebookPermissionChoice(int permissionChoice) {
+        savePermissionChoice(PHONEBOOK_PREFS_NAME, permissionChoice);
+        mPhonebookPermissionChoice = permissionChoice;
+    }
+
     void setMessagePermissionChoice(int permissionChoice) {
-        // if user reject it, only save it when reject exceed limit.
-        if (permissionChoice == ACCESS_REJECTED) {
-            mMessageRejectedTimes++;
-            saveMessageRejectTimes();
-            if (mMessageRejectedTimes < PERSIST_REJECTED_TIMES_LIMIT) {
-                return;
-            }
-        }
-
+        savePermissionChoice(MESSAGE_PREFS_NAME, permissionChoice);
         mMessagePermissionChoice = permissionChoice;
+    }
 
+    private void savePermissionChoice(String prefsName, int permissionChoice) {
         SharedPreferences.Editor editor =
-            mContext.getSharedPreferences(MESSAGE_PREFS_NAME, Context.MODE_PRIVATE).edit();
-        if (permissionChoice == ACCESS_UNKNOWN) {
+            mContext.getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit();
+        if (permissionChoice == PERMISSION_ACCESS_UNKNOWN) {
             editor.remove(mDevice.getAddress());
         } else {
             editor.putInt(mDevice.getAddress(), permissionChoice);
@@ -801,28 +657,10 @@ final class CachedBluetoothDevice implements Comparable<CachedBluetoothDevice> {
         editor.commit();
     }
 
-    private void fetchMessagePermissionChoice() {
-        SharedPreferences preference = mContext.getSharedPreferences(MESSAGE_PREFS_NAME,
+    private int fetchPermissionChoice(String prefsName) {
+        SharedPreferences preference = mContext.getSharedPreferences(prefsName,
                                                                      Context.MODE_PRIVATE);
-        mMessagePermissionChoice = preference.getInt(mDevice.getAddress(),
-                                                       ACCESS_UNKNOWN);
-    }
-
-    private void fetchMessageRejectTimes() {
-        SharedPreferences preference = mContext.getSharedPreferences(MESSAGE_REJECT_TIMES,
-                                                                     Context.MODE_PRIVATE);
-        mMessageRejectedTimes = preference.getInt(mDevice.getAddress(), 0);
-    }
-
-    private void saveMessageRejectTimes() {
-        SharedPreferences.Editor editor =
-            mContext.getSharedPreferences(MESSAGE_REJECT_TIMES, Context.MODE_PRIVATE).edit();
-        if (mMessageRejectedTimes == 0) {
-            editor.remove(mDevice.getAddress());
-        } else {
-            editor.putInt(mDevice.getAddress(), mMessageRejectedTimes);
-        }
-        editor.commit();
+        return preference.getInt(mDevice.getAddress(), PERMISSION_ACCESS_UNKNOWN);
     }
 
 }

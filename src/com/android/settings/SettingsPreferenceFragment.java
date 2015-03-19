@@ -20,28 +20,27 @@ import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.Fragment;
 import android.content.ContentResolver;
-import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.database.DataSetObserver;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.net.Uri;
 import android.os.Bundle;
 import android.preference.Preference;
 import android.preference.PreferenceActivity;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceGroup;
+import android.preference.PreferenceScreen;
 import android.text.TextUtils;
 import android.util.Log;
-import android.util.Pair;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.widget.Button;
-import android.widget.ListAdapter;
-import android.widget.ListView;
 
-import com.android.settings.search.SearchHighlightAdapterWrapper;
-import com.android.settings.search.SearchPopulator;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Base class for Settings fragments, with some helper functions and dialog management.
@@ -56,19 +55,6 @@ public class SettingsPreferenceFragment extends PreferenceFragment implements Di
 
     private String mHelpUrl;
 
-    // Cache the content resolver for async callbacks
-    private ContentResolver mContentResolver;
-
-    private String mHighlightedPreferenceKey;
-    private SearchHighlightAdapterWrapper mSearchHighlightAdapter;
-    private boolean mPrefsObserverRegistered;
-    private DataSetObserver mPrefsObserver = new DataSetObserver() {
-        @Override
-        public void onChanged() {
-            updateHighlightPositionIfNeeded();
-        }
-    };
-
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
@@ -81,91 +67,11 @@ public class SettingsPreferenceFragment extends PreferenceFragment implements Di
     }
 
     @Override
-    protected void bindPreferences() {
-        super.bindPreferences();
-
-        ListAdapter adapter = getPreferenceScreen().getRootAdapter();
-        if (mPrefsObserverRegistered) {
-            adapter.unregisterDataSetObserver(mPrefsObserver);
-            mPrefsObserverRegistered = false;
-        }
-
-        if (mHighlightedPreferenceKey != null) {
-            int highlightColor = getResources().getColor(R.color.search_pref_highlight_background);
-
-            adapter.registerDataSetObserver(mPrefsObserver);
-            mPrefsObserverRegistered = true;
-
-            mSearchHighlightAdapter = new SearchHighlightAdapterWrapper(adapter,
-                    300, 650, highlightColor);
-            getListView().setAdapter(mSearchHighlightAdapter);
-            updateHighlightPositionIfNeeded();
-       } else {
-            mSearchHighlightAdapter = null;
-        }
-    }
-
-    private void updateHighlightPositionIfNeeded() {
-        Preference pref = mHighlightedPreferenceKey != null
-                ? findPreference(mHighlightedPreferenceKey) : null;
-        if (pref == null) {
-            return;
-        }
-
-        int position = countPreferencesInGroup(getPreferenceScreen(), pref).first;
-        getListView().smoothScrollToPosition(position);
-        mSearchHighlightAdapter.setHighlightedPosition(position);
-    }
-
-    private Pair<Integer, Boolean> countPreferencesInGroup(PreferenceGroup group,
-            Preference stopAt) {
-        int result = 0, count = group.getPreferenceCount();
-        for (int i = 0; i < count; i++) {
-            Preference p = group.getPreference(i);
-
-            // if this is our target, stop right away
-            if (p == stopAt) {
-                return Pair.create(result, true);
-            }
-
-            // count the preference itself (or, in the case of a PreferenceCategory, its header)
-            result++;
-
-            if (p instanceof PreferenceGroup) {
-                // count preferences in this group
-                PreferenceGroup pg = (PreferenceGroup) p;
-                Pair<Integer, Boolean> prefsInGroup = countPreferencesInGroup(pg, stopAt);
-                result += prefsInGroup.first;
-                if (prefsInGroup.second) {
-                    return Pair.create(result, true);
-                }
-            }
-        }
-        return Pair.create(result, false);
-    }
-
-    @Override
     public void onActivityCreated(Bundle savedInstanceState) {
-        Bundle args = getArguments();
-        if (args != null && args.containsKey(SearchPopulator.EXTRA_PREF_KEY)) {
-            mHighlightedPreferenceKey = args.getString(SearchPopulator.EXTRA_PREF_KEY);
-        }
-        if (mHighlightedPreferenceKey == null) {
-            Intent intent = getActivity().getIntent();
-            mHighlightedPreferenceKey = intent.getStringExtra(SearchPopulator.EXTRA_PREF_KEY);
-        }
-
         super.onActivityCreated(savedInstanceState);
         if (!TextUtils.isEmpty(mHelpUrl)) {
             setHasOptionsMenu(true);
         }
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        // we only want to highlight once
-        mHighlightedPreferenceKey = null;
     }
 
     protected void removePreference(String key) {
@@ -205,11 +111,7 @@ public class SettingsPreferenceFragment extends PreferenceFragment implements Di
      * Returns the ContentResolver from the owning Activity.
      */
     protected ContentResolver getContentResolver() {
-        Context context = getActivity();
-        if (context != null) {
-            mContentResolver = context.getContentResolver();
-        }
-        return mContentResolver;
+        return getActivity().getContentResolver();
     }
 
     /**
@@ -338,11 +240,8 @@ public class SettingsPreferenceFragment extends PreferenceFragment implements Di
                     mParentFragment = getFragmentManager().findFragmentById(mParentFragmentId);
                     if (!(mParentFragment instanceof DialogCreatable)) {
                         throw new IllegalArgumentException(
-                                (mParentFragment != null
-                                        ? mParentFragment.getClass().getName()
-                                        : mParentFragmentId)
-                                + " must implement "
-                                + DialogCreatable.class.getName());
+                                KEY_PARENT_FRAGMENT_ID + " must implement "
+                                        + DialogCreatable.class.getName());
                     }
                 }
                 // This dialog fragment could be created from non-SettingsPreferenceFragment
@@ -413,5 +312,38 @@ public class SettingsPreferenceFragment extends PreferenceFragment implements Di
                     + ")");
             return false;
         }
+    }
+
+    public boolean removePreferenceIfPackageNotInstalled(Preference preference) {
+        return removePreferenceIfPackageNotInstalled(preference, getPreferenceScreen());
+    }
+
+    public boolean removePreferenceIfPackageNotInstalled(Preference preference, PreferenceGroup parent) {
+        String intentUri = ((PreferenceScreen) preference).getIntent().toUri(1);
+        Pattern pattern = Pattern.compile("component=([^/]+)/");
+        Matcher matcher = pattern.matcher(intentUri);
+
+        String packageName = matcher.find() ? matcher.group(1) : null;
+        boolean available = true;
+
+        if (packageName != null) {
+            try {
+                PackageInfo pi = getPackageManager().getPackageInfo(packageName, 0);
+                if (!pi.applicationInfo.enabled) {
+                    Log.e(TAG, "package " + packageName + " disabled, hiding preference.");
+                    available = false;
+                }
+            } catch (NameNotFoundException e) {
+                Log.e(TAG, "package " + packageName + " not installed, hiding preference.");
+                available = false;
+            }
+        }
+
+        if (!available) {
+            parent.removePreference(preference);
+            return true;
+        }
+
+        return false;
     }
 }

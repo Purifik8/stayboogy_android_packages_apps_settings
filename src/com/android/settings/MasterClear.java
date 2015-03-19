@@ -29,7 +29,6 @@ import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.SystemProperties;
-import android.os.UserManager;
 import android.preference.Preference;
 import android.preference.PreferenceActivity;
 import android.util.Log;
@@ -55,16 +54,13 @@ public class MasterClear extends Fragment {
     private static final String TAG = "MasterClear";
 
     private static final int KEYGUARD_REQUEST = 55;
-    private static final int PIN_REQUEST = 56;
 
-    static final String WIPE_MEDIA_EXTRA = "wipe_media";
     static final String ERASE_EXTERNAL_EXTRA = "erase_sd";
 
     private View mContentView;
     private Button mInitiateButton;
     private View mExternalStorageContainer;
     private CheckBox mExternalStorage;
-    private boolean mPinConfirmed;
 
     /**
      * Keyguard validation is run using the standard {@link ConfirmLockPattern}
@@ -80,25 +76,11 @@ public class MasterClear extends Fragment {
                         res.getText(R.string.master_clear_gesture_explanation));
     }
 
-    private boolean runRestrictionsChallenge() {
-        if (UserManager.get(getActivity()).hasRestrictionsChallenge()) {
-            startActivityForResult(
-                    new Intent(Intent.ACTION_RESTRICTIONS_CHALLENGE), PIN_REQUEST);
-            return true;
-        }
-        return false;
-    }
-
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == PIN_REQUEST) {
-            if (resultCode == Activity.RESULT_OK) {
-                mPinConfirmed = true;
-            }
-            return;
-        } else if (requestCode != KEYGUARD_REQUEST) {
+        if (requestCode != KEYGUARD_REQUEST) {
             return;
         }
 
@@ -115,14 +97,7 @@ public class MasterClear extends Fragment {
         Preference preference = new Preference(getActivity());
         preference.setFragment(MasterClearConfirm.class.getName());
         preference.setTitle(R.string.master_clear_confirm_title);
-        if (mExternalStorage.isChecked()) {
-            if (Environment.isExternalStorageEmulated()) {
-                preference.getExtras().putBoolean(WIPE_MEDIA_EXTRA, true);
-            }
-            else {
-                preference.getExtras().putBoolean(ERASE_EXTERNAL_EXTRA, true);
-            }
-        }
+        preference.getExtras().putBoolean(ERASE_EXTERNAL_EXTRA, mExternalStorage.isChecked());
         ((PreferenceActivity) getActivity()).onPreferenceStartFragment(null, preference);
     }
 
@@ -134,10 +109,6 @@ public class MasterClear extends Fragment {
     private final Button.OnClickListener mInitiateListener = new Button.OnClickListener() {
 
         public void onClick(View v) {
-            mPinConfirmed = false;
-            if (runRestrictionsChallenge()) {
-                return;
-            }
             if (!runKeyguardConfirmation(KEYGUARD_REQUEST)) {
                 showFinalConfirmation();
             }
@@ -170,9 +141,8 @@ public class MasterClear extends Fragment {
          * encrypted, and will also need to be wiped.
          */
         boolean isExtStorageEmulated = Environment.isExternalStorageEmulated();
-        /* CM's recovery (and most custom ones) does NOT clear emulated
-         * storage when asked for a reset  */
-        if (!Environment.isExternalStorageRemovable() && isExtStorageEncrypted()) {
+        if (isExtStorageEmulated
+                || (!Environment.isExternalStorageRemovable() && isExtStorageEncrypted())) {
             mExternalStorageContainer.setVisibility(View.GONE);
 
             final View externalOption = mContentView.findViewById(R.id.erase_external_option_text);
@@ -268,18 +238,5 @@ public class MasterClear extends Fragment {
 
         establishInitialState();
         return mContentView;
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-
-        // If this is the second step after restrictions pin challenge
-        if (mPinConfirmed) {
-            mPinConfirmed = false;
-            if (!runKeyguardConfirmation(KEYGUARD_REQUEST)) {
-                showFinalConfirmation();
-            }
-        }
     }
 }

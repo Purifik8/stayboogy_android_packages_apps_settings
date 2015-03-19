@@ -19,9 +19,6 @@ package com.android.settings;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SELinux;
@@ -31,11 +28,8 @@ import android.os.UserHandle;
 import android.preference.Preference;
 import android.preference.PreferenceGroup;
 import android.preference.PreferenceScreen;
-import android.telephony.MSimTelephonyManager;
 import android.util.Log;
 import android.widget.Toast;
-
-import com.android.settings.deviceinfo.msim.MSimStatus;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -43,7 +37,7 @@ import java.io.IOException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class DeviceInfoSettings extends RestrictedSettingsFragment {
+public class DeviceInfoSettings extends SettingsPreferenceFragment {
 
     private static final String LOG_TAG = "DeviceInfoSettings";
 
@@ -54,7 +48,6 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
 
     private static final String KEY_CONTAINER = "container";
     private static final String KEY_TEAM = "team";
-    private static final String KEY_CHANGELOG = "changelog";
     private static final String KEY_CONTRIBUTORS = "contributors";
     private static final String KEY_REGULATORY_INFO = "regulatory_info";
     private static final String KEY_TERMS = "terms";
@@ -77,26 +70,17 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
     private static final String KEY_DEVICE_CPU = "device_cpu";
     private static final String KEY_DEVICE_MEMORY = "device_memory";
     private static final String KEY_CM_UPDATES = "cm_updates";
-    private static final String KEY_STATUS = "status_info";
 
     static final int TAPS_TO_BE_A_DEVELOPER = 7;
     long[] mHits = new long[3];
     int mDevHitCountdown;
     Toast mDevHitToast;
 
-    public DeviceInfoSettings() {
-        super(null /* Don't PIN protect the entire screen */);
-    }
-
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
 
         addPreferencesFromResource(R.xml.device_info_settings);
-
-        // We only call ensurePinRestrictedPreference() when mDevHitCountdown == 0.
-        // This will keep us from entering developer mode without a PIN.
-        protectByRestrictions(KEY_BUILD_NUMBER);
 
         setStringSummary(KEY_FIRMWARE_VERSION, Build.VERSION.RELEASE);
         findPreference(KEY_FIRMWARE_VERSION).setEnabled(true);
@@ -107,7 +91,7 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
         setStringSummary(KEY_BUILD_NUMBER, Build.DISPLAY);
         findPreference(KEY_BUILD_NUMBER).setEnabled(true);
         findPreference(KEY_KERNEL_VERSION).setSummary(getFormattedKernelVersion());
-        setValueSummary(KEY_MOD_VERSION, "ro.cm.display.version");
+        setValueSummary(KEY_MOD_VERSION, "ro.cm.version");
         findPreference(KEY_MOD_VERSION).setEnabled(true);
         setValueSummary(KEY_MOD_BUILD_DATE, "ro.build.date");
 
@@ -118,17 +102,13 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
             String status = getResources().getString(R.string.selinux_status_permissive);
             setStringSummary(KEY_SELINUX_STATUS, status);
         }
-
-        if (MSimTelephonyManager.getDefault().isMultiSimEnabled()) {
-            findPreference(KEY_STATUS).getIntent().setClassName(
-                    getActivity().getPackageName(), MSimStatus.class.getName());
-        }
+        findPreference(KEY_SELINUX_STATUS).setEnabled(true);
 
         // Remove selinux information if property is not present
         removePreferenceIfPropertyMissing(getPreferenceScreen(), KEY_SELINUX_STATUS,
                 PROPERTY_SELINUX_STATUS);
 
-        final String cpuInfo = getCPUInfo();
+        String cpuInfo = getCPUInfo();
         String memInfo = getMemInfo();
 
         // Only the owner should see the Updater settings, if it exists
@@ -185,17 +165,10 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
             Utils.updatePreferenceToSpecificActivityOrRemove(act, parentPreference,
                     KEY_SYSTEM_UPDATE_SETTINGS,
                     Utils.UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY);
-            /* Make sure the activity is provided by who we want... */
-            if (findPreference(KEY_SYSTEM_UPDATE_SETTINGS) != null)
-                removePreferenceIfPackageNotInstalled(findPreference(KEY_SYSTEM_UPDATE_SETTINGS));
         } else {
             // Remove for secondary users
             removePreference(KEY_SYSTEM_UPDATE_SETTINGS);
         }
-        if ("user".equals(Build.TYPE)) {
-            removePreference(KEY_CHANGELOG);
-        }
-
         Utils.updatePreferenceToSpecificActivityOrRemove(act, parentPreference, KEY_CONTRIBUTORS,
                 Utils.UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY);
 
@@ -233,50 +206,45 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
                 }
             }
         } else if (preference.getKey().equals(KEY_BUILD_NUMBER)) {
-            // Don't enable developer options for secondary users.
-            if (UserHandle.myUserId() != UserHandle.USER_OWNER) return true;
-
-            if (mDevHitCountdown > 0) {
-                if (mDevHitCountdown == 1) {
-                    if (super.ensurePinRestrictedPreference(preference)) {
-                        return true;
+            // Only allow the owner of the device to turn on dev and performance options
+            if (UserHandle.myUserId() == UserHandle.USER_OWNER) {
+                if (mDevHitCountdown > 0) {
+                    mDevHitCountdown--;
+                    if (mDevHitCountdown == 0) {
+                        getActivity().getSharedPreferences(DevelopmentSettings.PREF_FILE,
+                                Context.MODE_PRIVATE).edit().putBoolean(
+                                        DevelopmentSettings.PREF_SHOW, true).apply();
+                        if (mDevHitToast != null) {
+                            mDevHitToast.cancel();
+                        }
+                        mDevHitToast = Toast.makeText(getActivity(), R.string.show_dev_on,
+                                Toast.LENGTH_LONG);
+                        mDevHitToast.show();
+                    } else if (mDevHitCountdown > 0
+                            && mDevHitCountdown < (TAPS_TO_BE_A_DEVELOPER-2)) {
+                        if (mDevHitToast != null) {
+                            mDevHitToast.cancel();
+                        }
+                        mDevHitToast = Toast.makeText(getActivity(), getResources().getQuantityString(
+                                R.plurals.show_dev_countdown, mDevHitCountdown, mDevHitCountdown),
+                                Toast.LENGTH_SHORT);
+                        mDevHitToast.show();
                     }
-                }
-                mDevHitCountdown--;
-                if (mDevHitCountdown == 0) {
-                    getActivity().getSharedPreferences(DevelopmentSettings.PREF_FILE,
-                            Context.MODE_PRIVATE).edit().putBoolean(
-                                    DevelopmentSettings.PREF_SHOW, true).apply();
+                } else if (mDevHitCountdown < 0) {
                     if (mDevHitToast != null) {
                         mDevHitToast.cancel();
                     }
-                    mDevHitToast = Toast.makeText(getActivity(), R.string.show_dev_on_cm,
+                    mDevHitToast = Toast.makeText(getActivity(), R.string.show_dev_already,
                             Toast.LENGTH_LONG);
                     mDevHitToast.show();
-                } else if (mDevHitCountdown > 0
-                        && mDevHitCountdown < (TAPS_TO_BE_A_DEVELOPER-2)) {
-                    if (mDevHitToast != null) {
-                        mDevHitToast.cancel();
-                    }
-                    mDevHitToast = Toast.makeText(getActivity(), getResources().getQuantityString(
-                            R.plurals.show_dev_countdown_cm, mDevHitCountdown, mDevHitCountdown),
-                            Toast.LENGTH_SHORT);
-                    mDevHitToast.show();
                 }
-            } else if (mDevHitCountdown < 0) {
-                if (mDevHitToast != null) {
-                    mDevHitToast.cancel();
-                }
-                mDevHitToast = Toast.makeText(getActivity(), R.string.show_dev_already_cm,
-                        Toast.LENGTH_LONG);
-                mDevHitToast.show();
             }
         } else if (preference.getKey().equals(KEY_MOD_VERSION)) {
             System.arraycopy(mHits, 1, mHits, 0, mHits.length-1);
             mHits[mHits.length-1] = SystemClock.uptimeMillis();
             if (mHits[0] >= (SystemClock.uptimeMillis()-500)) {
                 Intent intent = new Intent(Intent.ACTION_MAIN);
-                intent.putExtra("is_cm", true);
+                intent.putExtra("is_cid", true);
                 intent.setClassName("android",
                         com.android.internal.app.PlatLogoActivity.class.getName());
                 try {
@@ -284,6 +252,22 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
                 } catch (Exception e) {
                     Log.e(LOG_TAG, "Unable to start activity " + intent.toString());
                 }
+            }
+        } else if (preference.getKey().equals(KEY_SELINUX_STATUS)) {
+            System.arraycopy(mHits, 1, mHits, 0, mHits.length-1);
+            mHits[mHits.length-1] = SystemClock.uptimeMillis();
+            if (mHits[0] >= (SystemClock.uptimeMillis()-500)) {
+                    SELinux.setSELinuxEnforce(!SELinux.isSELinuxEnforced());
+                    if (!SELinux.isSELinuxEnabled()) {
+                            String status = getResources().getString(R.string.selinux_status_disabled);
+                            setStringSummary(KEY_SELINUX_STATUS, status);
+                    } else if (!SELinux.isSELinuxEnforced()) {
+                            String status = getResources().getString(R.string.selinux_status_permissive);
+                            setStringSummary(KEY_SELINUX_STATUS, status);
+                    } else if (SELinux.isSELinuxEnforced()) {
+                            String status = getResources().getString(R.string.selinux_status_enforcing);
+                            setStringSummary(KEY_SELINUX_STATUS, status);
+                    }
             }
         }
         return super.onPreferenceTreeClick(preferenceScreen, preference);
@@ -432,64 +416,18 @@ public class DeviceInfoSettings extends RestrictedSettingsFragment {
 
     private String getCPUInfo() {
         String result = null;
-        int coreCount = 0;
 
         try {
             /* The expected /proc/cpuinfo output is as follows:
              * Processor	: ARMv7 Processor rev 2 (v7l)
              * BogoMIPS	: 272.62
-             *
-             * On kernel 3.10 this changed, it is now the last
-             * line. So let's read the whole thing, search
-             * specifically for "Processor", and retain the old
-             * "first line" as fallback.
-             * Also, use "processor : <id>" to count cores
              */
-            BufferedReader ci = new BufferedReader(new FileReader(FILENAME_PROC_CPUINFO));
-            String firstLine = ci.readLine();
-            String latestLine = firstLine;
-            while (latestLine != null) {
-                if (latestLine.startsWith("Processor"))
-                  result = latestLine.split(":")[1].trim();
-                if (latestLine.startsWith("processor"))
-                  coreCount++;
-                latestLine = ci.readLine();
-            }
-            if (result == null && firstLine != null) {
+            String firstLine = readLine(FILENAME_PROC_CPUINFO);
+            if (firstLine != null) {
                 result = firstLine.split(":")[1].trim();
             }
-            /* Don't do this. hotplug throws off the count
-            if (coreCount > 1) {
-                result = result + " (x" + coreCount + ")";
-            }
-            */
-            ci.close();
         } catch (IOException e) {}
 
         return result;
-    }
-
-    private boolean removePreferenceIfPackageNotInstalled(Preference preference) {
-        String intentUri=((PreferenceScreen) preference).getIntent().toUri(1);
-        Pattern pattern = Pattern.compile("component=([^/]+)/");
-        Matcher matcher = pattern.matcher(intentUri);
-
-        String packageName=matcher.find()?matcher.group(1):null;
-        if(packageName != null) {
-            try {
-                PackageInfo pi = getPackageManager().getPackageInfo(packageName,
-                        PackageManager.GET_ACTIVITIES);
-                if (!pi.applicationInfo.enabled) {
-                    Log.e(LOG_TAG,"package "+packageName+" is disabled, hiding preference.");
-                    getPreferenceScreen().removePreference(preference);
-                    return true;
-                }
-            } catch (NameNotFoundException e) {
-                Log.e(LOG_TAG,"package "+packageName+" not installed, hiding preference.");
-                getPreferenceScreen().removePreference(preference);
-                return true;
-            }
-        }
-        return false;
     }
 }

@@ -22,7 +22,6 @@ import static android.net.NetworkPolicyManager.POLICY_REJECT_METERED_BACKGROUND;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
-import android.app.AppOpsManager;
 import android.app.Fragment;
 import android.app.INotificationManager;
 import android.content.ComponentName;
@@ -50,7 +49,6 @@ import android.provider.Settings;
 import android.support.v4.view.PagerAdapter;
 import android.support.v4.view.PagerTabStrip;
 import android.support.v4.view.ViewPager;
-import android.text.BidiFormatter;
 import android.text.format.Formatter;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -79,6 +77,7 @@ import com.android.settings.deviceinfo.StorageMeasurement;
 import com.android.settings.Utils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -163,15 +162,12 @@ public class ManageApplications extends Fragment implements
     public static final int FILTER_APPS_ALL = MENU_OPTIONS_BASE + 0;
     public static final int FILTER_APPS_THIRD_PARTY = MENU_OPTIONS_BASE + 1;
     public static final int FILTER_APPS_SDCARD = MENU_OPTIONS_BASE + 2;
-    public static final int FILTER_APPS_DISABLED = MENU_OPTIONS_BASE + 3;
 
     public static final int SORT_ORDER_ALPHA = MENU_OPTIONS_BASE + 4;
     public static final int SORT_ORDER_SIZE = MENU_OPTIONS_BASE + 5;
     public static final int SHOW_RUNNING_SERVICES = MENU_OPTIONS_BASE + 6;
     public static final int SHOW_BACKGROUND_PROCESSES = MENU_OPTIONS_BASE + 7;
     public static final int RESET_APP_PREFERENCES = MENU_OPTIONS_BASE + 8;
-    public static final int SHOW_PROTECTED_APPS = MENU_OPTIONS_BASE + 9;
-
     // sort order
     private int mSortOrder = SORT_ORDER_ALPHA;
     
@@ -226,7 +222,6 @@ public class ManageApplications extends Fragment implements
             switch (listType) {
                 case LIST_TYPE_DOWNLOADED: mFilter = FILTER_APPS_THIRD_PARTY; break;
                 case LIST_TYPE_SDCARD: mFilter = FILTER_APPS_SDCARD; break;
-                case LIST_TYPE_DISABLED: mFilter = FILTER_APPS_DISABLED; break;
                 default: mFilter = FILTER_APPS_ALL; break;
             }
             mClickListener = clickListener;
@@ -249,6 +244,7 @@ public class ManageApplications extends Fragment implements
             mRootView = inflater.inflate(mListType == LIST_TYPE_RUNNING
                     ? R.layout.manage_applications_running
                     : R.layout.manage_applications_apps, null);
+            mRootView.setLayoutDirection(mRootView.getResources().getConfiguration().getLayoutDirection());
             mLoadingContainer = mRootView.findViewById(R.id.loading_container);
             mLoadingContainer.setVisibility(View.VISIBLE);
             mListContainer = mRootView.findViewById(R.id.list_container);
@@ -389,21 +385,20 @@ public class ManageApplications extends Fragment implements
                 return;
             }
             if (mTotalStorage > 0) {
-                BidiFormatter bidiFormatter = BidiFormatter.getInstance();
                 mColorBar.setRatios((mTotalStorage-mFreeStorage-mAppStorage)/(float)mTotalStorage,
                         mAppStorage/(float)mTotalStorage, mFreeStorage/(float)mTotalStorage);
                 long usedStorage = mTotalStorage - mFreeStorage;
                 if (mLastUsedStorage != usedStorage) {
                     mLastUsedStorage = usedStorage;
-                    String sizeStr = bidiFormatter.unicodeWrap(
-                            Formatter.formatShortFileSize(mOwner.getActivity(), usedStorage));
+                    String sizeStr = Formatter.formatShortFileSize(
+                            mOwner.getActivity(), usedStorage);
                     mUsedStorageText.setText(mOwner.getActivity().getResources().getString(
                             R.string.service_foreground_processes, sizeStr));
                 }
                 if (mLastFreeStorage != mFreeStorage) {
                     mLastFreeStorage = mFreeStorage;
-                    String sizeStr = bidiFormatter.unicodeWrap(
-                            Formatter.formatShortFileSize(mOwner.getActivity(), mFreeStorage));
+                    String sizeStr = Formatter.formatShortFileSize(
+                            mOwner.getActivity(), mFreeStorage);
                     mFreeStorageText.setText(mOwner.getActivity().getResources().getString(
                             R.string.service_background_processes, sizeStr));
                 }
@@ -435,7 +430,6 @@ public class ManageApplications extends Fragment implements
         }
     }
     private final ArrayList<TabInfo> mTabs = new ArrayList<TabInfo>();
-    private int mNumTabs;
     TabInfo mCurTab = null;
 
     // Size resource used for packages whose size computation failed for some reason
@@ -456,7 +450,6 @@ public class ManageApplications extends Fragment implements
     static final int LIST_TYPE_RUNNING = 1;
     static final int LIST_TYPE_SDCARD = 2;
     static final int LIST_TYPE_ALL = 3;
-    static final int LIST_TYPE_DISABLED = 4;
 
     private boolean mShowBackground = false;
     
@@ -474,7 +467,7 @@ public class ManageApplications extends Fragment implements
 
         @Override
         public int getCount() {
-            return mNumTabs;
+            return mTabs.size();
         }
         
         @Override
@@ -482,7 +475,6 @@ public class ManageApplications extends Fragment implements
             TabInfo tab = mTabs.get(position);
             View root = tab.build(mInflater, mContentContainer, mRootView);
             container.addView(root);
-            root.setTag(R.id.name, tab);
             return root;
         }
 
@@ -494,12 +486,6 @@ public class ManageApplications extends Fragment implements
         @Override
         public boolean isViewFromObject(View view, Object object) {
             return view == object;
-        }
-
-        @Override
-        public int getItemPosition(Object object) {
-            return super.getItemPosition(object);
-            //return ((TabInfo)((View)object).getTag(R.id.name)).mListType;
         }
 
         @Override
@@ -624,11 +610,8 @@ public class ManageApplications extends Fragment implements
                         mWhichSize = SIZE_EXTERNAL;
                     }
                     break;
-                case FILTER_APPS_DISABLED:
-                    filterObj = ApplicationsState.DISABLED_FILTER;
-                    break;
                 default:
-                    filterObj = ApplicationsState.ALL_ENABLED_FILTER;
+                    filterObj = null;
                     break;
             }
             switch (mLastSortMode) {
@@ -889,18 +872,12 @@ public class ManageApplications extends Fragment implements
                 getActivity().getString(R.string.filter_apps_all),
                 LIST_TYPE_ALL, this, savedInstanceState);
         mTabs.add(tab);
-
-        tab = new TabInfo(this, mApplicationsState,
-                getActivity().getString(R.string.filter_apps_disabled),
-                LIST_TYPE_DISABLED, this, savedInstanceState);
-        mTabs.add(tab);
-
-        mNumTabs = mTabs.size();
     }
 
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+        container.setLayoutDirection(container.getResources().getConfiguration().getLayoutDirection());
         // initialize the inflater
         mInflater = inflater;
 
@@ -927,6 +904,10 @@ public class ManageApplications extends Fragment implements
         }
 
         if (savedInstanceState == null) {
+            //Reverse the tab list once if the language is RTL.
+            if(container.isLayoutRtl()){
+                Collections.reverse(mTabs);
+            }
             // First time init: make sure view pager is showing the correct tab.
             for (int i = 0; i < mTabs.size(); i++) {
                 TabInfo tab = mTabs.get(i);
@@ -950,7 +931,6 @@ public class ManageApplications extends Fragment implements
         super.onResume();
         mActivityResumed = true;
         updateCurrentTab(mViewPager.getCurrentItem());
-        updateNumTabs();
         updateOptionsMenu();
     }
 
@@ -1003,16 +983,6 @@ public class ManageApplications extends Fragment implements
         }
     }
 
-    private void updateNumTabs() {
-        int newNum = mApplicationsState.haveDisabledApps() ? mTabs.size() : (mTabs.size()-1);
-        if (newNum != mNumTabs) {
-            mNumTabs = newNum;
-            if (mViewPager != null) {
-                mViewPager.getAdapter().notifyDataSetChanged();
-            }
-        }
-    }
-
     TabInfo tabForType(int type) {
         for (int i = 0; i < mTabs.size(); i++) {
             TabInfo tab = mTabs.get(i);
@@ -1051,10 +1021,6 @@ public class ManageApplications extends Fragment implements
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
         menu.add(0, RESET_APP_PREFERENCES, 4, R.string.reset_app_preferences)
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        if (!Utils.isRestrictedProfile(getActivity())) {
-            menu.add(0, SHOW_PROTECTED_APPS, 5, R.string.protected_apps)
-                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        }
         updateOptionsMenu();
     }
     
@@ -1092,9 +1058,6 @@ public class ManageApplications extends Fragment implements
             mOptionsMenu.findItem(SHOW_RUNNING_SERVICES).setVisible(showingBackground);
             mOptionsMenu.findItem(SHOW_BACKGROUND_PROCESSES).setVisible(!showingBackground);
             mOptionsMenu.findItem(RESET_APP_PREFERENCES).setVisible(false);
-            if (!Utils.isRestrictedProfile(getActivity())) {
-                mOptionsMenu.findItem(SHOW_PROTECTED_APPS).setVisible(true);
-            }
             mShowBackground = showingBackground;
         } else {
             mOptionsMenu.findItem(SORT_ORDER_ALPHA).setVisible(mSortOrder != SORT_ORDER_ALPHA);
@@ -1102,9 +1065,6 @@ public class ManageApplications extends Fragment implements
             mOptionsMenu.findItem(SHOW_RUNNING_SERVICES).setVisible(false);
             mOptionsMenu.findItem(SHOW_BACKGROUND_PROCESSES).setVisible(false);
             mOptionsMenu.findItem(RESET_APP_PREFERENCES).setVisible(true);
-            if (!Utils.isRestrictedProfile(getActivity())) {
-                mOptionsMenu.findItem(SHOW_PROTECTED_APPS).setVisible(true);
-            }
         }
     }
 
@@ -1132,13 +1092,9 @@ public class ManageApplications extends Fragment implements
     public void onClick(DialogInterface dialog, int which) {
         if (mResetDialog == dialog) {
             final PackageManager pm = getActivity().getPackageManager();
-            final IPackageManager mIPm = IPackageManager.Stub.asInterface(
-                    ServiceManager.getService("package"));
             final INotificationManager nm = INotificationManager.Stub.asInterface(
                     ServiceManager.getService(Context.NOTIFICATION_SERVICE));
             final NetworkPolicyManager npm = NetworkPolicyManager.from(getActivity());
-            final AppOpsManager aom = (AppOpsManager)getActivity().getSystemService(
-                    Context.APP_OPS_SERVICE);
             final Handler handler = new Handler(getActivity().getMainLooper());
             (new AsyncTask<Void, Void, Void>() {
                 @Override protected Void doInBackground(Void... params) {
@@ -1148,9 +1104,11 @@ public class ManageApplications extends Fragment implements
                         ApplicationInfo app = apps.get(i);
                         try {
                             if (DEBUG) Log.v(TAG, "Enabling notifications: " + app.packageName);
-                            nm.setNotificationsEnabledForPackage(app.packageName, app.uid, true);
+                            nm.setNotificationsEnabledForPackage(app.packageName, true);
                         } catch (android.os.RemoteException ex) {
                         }
+                        if (DEBUG) Log.v(TAG, "Clearing preferred: " + app.packageName);
+                        pm.clearPackagePreferredActivities(app.packageName);
                         if (!app.enabled) {
                             if (DEBUG) Log.v(TAG, "Enabling app: " + app.packageName);
                             if (pm.getApplicationEnabledSetting(app.packageName)
@@ -1161,11 +1119,17 @@ public class ManageApplications extends Fragment implements
                             }
                         }
                     }
-                    try {
-                        mIPm.resetPreferredActivities(UserHandle.myUserId());
-                    } catch (RemoteException e) {
+                    // We should have cleared all of the preferred apps above;
+                    // just in case some may be lingering, retrieve whatever is
+                    // still set and remove it.
+                    ArrayList<IntentFilter> filters = new ArrayList<IntentFilter>();
+                    ArrayList<ComponentName> prefActivities = new ArrayList<ComponentName>();
+                    pm.getPreferredActivities(filters, prefActivities, null);
+                    for (int i=0; i<prefActivities.size(); i++) {
+                        if (DEBUG) Log.v(TAG, "Clearing preferred: "
+                                + prefActivities.get(i).getPackageName());
+                        pm.clearPackagePreferredActivities(prefActivities.get(i).getPackageName());
                     }
-                    aom.resetAllModes();
                     final int[] restrictedUids = npm.getUidsWithPolicy(
                             POLICY_REJECT_METERED_BACKGROUND);
                     final int currentUserId = ActivityManager.getCurrentUser();
@@ -1219,10 +1183,6 @@ public class ManageApplications extends Fragment implements
             }
         } else if (menuId == RESET_APP_PREFERENCES) {
             buildResetDialog();
-        } else if (menuId == SHOW_PROTECTED_APPS) {
-            //Launch Protected Apps Fragment
-            Intent intent = new Intent(getActivity(), ProtectedAppsActivity.class);
-            startActivity(intent);
         } else {
             // Handle the home button
             return false;

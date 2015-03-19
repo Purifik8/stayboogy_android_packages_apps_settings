@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
- * Copyright (C) 2014 The CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,45 +17,35 @@
 package com.android.settings;
 
 import static android.provider.Settings.System.SCREEN_OFF_TIMEOUT;
-import static android.provider.Settings.System.SCREEN_ANIMATION_STYLE;
 
 import android.app.ActivityManagerNative;
 import android.app.Dialog;
 import android.app.admin.DevicePolicyManager;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.ContentObserver;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.WifiDisplayStatus;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.RemoteException;
-import android.os.UserHandle;
 import android.preference.CheckBoxPreference;
 import android.preference.ListPreference;
 import android.preference.Preference;
-import android.preference.PreferenceManager;
 import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceCategory;
 import android.preference.PreferenceScreen;
 import android.provider.Settings;
 import android.util.Log;
 
-import android.view.WindowManagerGlobal;
 import com.android.internal.view.RotationPolicy;
-import com.android.settings.DreamSettings;
-import com.android.settings.Utils;
 import com.android.settings.cyanogenmod.DisplayRotation;
-import com.android.settings.hardware.DisplayColor;
-import com.android.settings.hardware.DisplayGamma;
-
-import org.cyanogenmod.hardware.AdaptiveBacklight;
-import org.cyanogenmod.hardware.ColorEnhancement;
-import org.cyanogenmod.hardware.SunlightEnhancement;
-import org.cyanogenmod.hardware.TapToWake;
+import com.android.settings.Utils;
 
 import java.util.ArrayList;
 
@@ -64,62 +53,44 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
         Preference.OnPreferenceChangeListener, OnPreferenceClickListener {
     private static final String TAG = "DisplaySettings";
 
-    /** If there is no setting in the provider, use this. */
+    // If there is no setting in the provider, use this
     private static final int FALLBACK_SCREEN_TIMEOUT_VALUE = 30000;
 
     private static final String KEY_SCREEN_TIMEOUT = "screen_timeout";
-    private static final String KEY_ACCELEROMETER = "accelerometer";
     private static final String KEY_FONT_SIZE = "font_size";
     private static final String KEY_SCREEN_SAVER = "screensaver";
+    private static final String KEY_WIFI_DISPLAY = "wifi_display";
     private static final String KEY_DISPLAY_ROTATION = "display_rotation";
-    private static final String KEY_ADAPTIVE_BACKLIGHT = "adaptive_backlight";
-    private static final String KEY_SUNLIGHT_ENHANCEMENT = "sunlight_enhancement";
-    private static final String KEY_COLOR_ENHANCEMENT = "color_enhancement";
-    private static final String KEY_ADVANCED_DISPLAY_SETTINGS = "advanced_display_settings";
-    private static final String KEY_TAP_TO_WAKE = "double_tap_wake_gesture";
-    private static final String KEY_PROXIMITY_WAKE = "proximity_on_wake";
+    private static final String KEY_LOCKSCREEN_ROTATION = "lockscreen_rotation";
+    private static final String KEY_WAKEUP_CATEGORY = "category_wakeup_options";
+    private static final String KEY_HOME_WAKE = "pref_home_wake";
+    private static final String KEY_VOLUME_WAKE = "pref_volume_wake";
+    private static final String KEY_SCREEN_OFF_ANIMATION = "screen_off_animation";
 
-    private static final String CATEGORY_ADVANCED = "advanced_display_prefs";
-    private static final String CATEGORY_DISPLAY = "display_prefs";
-    private static final String CATEGORY_LIGHTS = "lights_prefs";
-    private static final String KEY_NOTIFICATION_PULSE = "notification_pulse";
-    private static final String KEY_BATTERY_LIGHT = "battery_light";
-    private static final String KEY_WAKE_WHEN_PLUGGED_OR_UNPLUGGED = "wake_when_plugged_or_unplugged";
-    private static final String KEY_SCREEN_ANIMATION_OFF = "screen_off_animation";
-    private static final String KEY_SCREEN_ANIMATION_STYLE = "screen_animation_style";
-    private static final String KEY_DISPLAY_COLOR = "color_calibration";
-    private static final String KEY_DISPLAY_GAMMA = "gamma_tuning";
-    private static final String KEY_SCREEN_COLOR_SETTINGS = "screencolor_settings";
+    // Strings used for building the summary
+    private static final String ROTATION_ANGLE_0 = "0";
+    private static final String ROTATION_ANGLE_90 = "90";
+    private static final String ROTATION_ANGLE_180 = "180";
+    private static final String ROTATION_ANGLE_270 = "270";
 
     private static final int DLG_GLOBAL_CHANGE_WARNING = 1;
 
-    private static final String KEY_EXPANDED_DESKTOP = "expanded_desktop";
-    private static final String KEY_EXPANDED_DESKTOP_NO_NAVBAR = "expanded_desktop_no_navbar";
-    private static final String CATEGORY_EXPANDED_DESKTOP = "expanded_desktop_category";
+    private DisplayManager mDisplayManager;
 
-    private ListPreference mExpandedDesktopPref;
-    private CheckBoxPreference mExpandedDesktopNoNavbarPref;
-
-    private CheckBoxPreference mAccelerometer;
-    private FontDialogPreference mFontSizePref;
-    private CheckBoxPreference mWakeWhenPluggedOrUnplugged;
-    private CheckBoxPreference mScreenOffAnimation;
-    private ListPreference mScreenAnimationStylePreference;
-
-    private PreferenceScreen mNotificationPulse;
-    private PreferenceScreen mBatteryPulse;
+    private CheckBoxPreference mHomeWake;
+    private CheckBoxPreference mVolumeWake;
     private PreferenceScreen mDisplayRotationPreference;
-    private PreferenceScreen mScreenColorSettings;
+    private WarnedListPreference mFontSizePref;
 
     private final Configuration mCurConfig = new Configuration();
 
     private ListPreference mScreenTimeoutPreference;
     private Preference mScreenSaverPreference;
 
-    private CheckBoxPreference mAdaptiveBacklight;
-    private CheckBoxPreference mSunlightEnhancement;
-    private CheckBoxPreference mColorEnhancement;
-    private CheckBoxPreference mTapToWake;
+    private WifiDisplayStatus mWifiDisplayStatus;
+    private Preference mWifiDisplayPreference;
+
+    private CheckBoxPreference mScreenOffAnimation;
 
     private ContentObserver mAccelerometerRotationObserver =
             new ContentObserver(new Handler()) {
@@ -145,48 +116,21 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
 
         addPreferencesFromResource(R.xml.display_settings);
 
-        PreferenceCategory displayPrefs = (PreferenceCategory) findPreference(CATEGORY_DISPLAY);
-        PreferenceCategory expandedCategory =
-                (PreferenceCategory) findPreference(CATEGORY_EXPANDED_DESKTOP);
-
-        // Expanded desktop
-        mExpandedDesktopPref = (ListPreference) findPreference(KEY_EXPANDED_DESKTOP);
-        mExpandedDesktopNoNavbarPref =
-                (CheckBoxPreference) findPreference(KEY_EXPANDED_DESKTOP_NO_NAVBAR);
-
-        int expandedDesktopValue = Settings.System.getInt(getContentResolver(),
-                Settings.System.EXPANDED_DESKTOP_STYLE, 0);
-
-        try {
-            // Only show the navigation bar category on devices that has a navigation bar
-            // unless we are forcing it via development settings
-            boolean forceNavbar = android.provider.Settings.System.getInt(getContentResolver(),
-                    android.provider.Settings.System.DEV_FORCE_SHOW_NAVBAR, 0) == 1;
-            boolean hasNavBar = WindowManagerGlobal.getWindowManagerService().hasNavigationBar()
-                    || forceNavbar;
-
-            if (hasNavBar) {
-                mExpandedDesktopPref.setOnPreferenceChangeListener(this);
-                mExpandedDesktopPref.setValue(String.valueOf(expandedDesktopValue));
-                updateExpandedDesktop(expandedDesktopValue);
-                expandedCategory.removePreference(mExpandedDesktopNoNavbarPref);
-            } else {
-                // Hide no-op "Status bar visible" expanded desktop mode
-                mExpandedDesktopNoNavbarPref.setOnPreferenceChangeListener(this);
-                mExpandedDesktopNoNavbarPref.setChecked(expandedDesktopValue > 0);
-                expandedCategory.removePreference(mExpandedDesktopPref);
-            }
-        } catch (RemoteException e) {
-            Log.e(TAG, "Error getting navigation bar status");
-        }
-
         mDisplayRotationPreference = (PreferenceScreen) findPreference(KEY_DISPLAY_ROTATION);
 
+        final CheckBoxPreference lockScreenRotation =
+                (CheckBoxPreference) findPreference(KEY_LOCKSCREEN_ROTATION);
+        if (lockScreenRotation != null) {
+            if (!res.getBoolean(com.android.internal.R.bool.config_enableLockScreenRotation)) {
+                getPreferenceScreen().removePreference(lockScreenRotation);
+            }
+        }
+
         mScreenSaverPreference = findPreference(KEY_SCREEN_SAVER);
-        if (mScreenSaverPreference != null
-                && getResources().getBoolean(
-                        com.android.internal.R.bool.config_dreamsSupported) == false) {
-            displayPrefs.removePreference(mScreenSaverPreference);
+        if (mScreenSaverPreference != null) {
+            if (!res.getBoolean(com.android.internal.R.bool.config_dreamsSupported)) {
+                getPreferenceScreen().removePreference(mScreenSaverPreference);
+            }
         }
 
         mScreenTimeoutPreference = (ListPreference) findPreference(KEY_SCREEN_TIMEOUT);
@@ -198,116 +142,60 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
         updateTimeoutPreferenceDescription(currentTimeout);
         updateDisplayRotationPreferenceDescription();
 
-        mFontSizePref = (FontDialogPreference) findPreference(KEY_FONT_SIZE);
+        mFontSizePref = (WarnedListPreference) findPreference(KEY_FONT_SIZE);
         mFontSizePref.setOnPreferenceChangeListener(this);
         mFontSizePref.setOnPreferenceClickListener(this);
 
-        PreferenceCategory advancedPrefs = (PreferenceCategory) findPreference(CATEGORY_ADVANCED);
-
-        mAdaptiveBacklight = (CheckBoxPreference) findPreference(KEY_ADAPTIVE_BACKLIGHT);
-        if (!isAdaptiveBacklightSupported()) {
-            advancedPrefs.removePreference(mAdaptiveBacklight);
-            mAdaptiveBacklight = null;
+        mDisplayManager = (DisplayManager)getActivity().getSystemService(
+                Context.DISPLAY_SERVICE);
+        mWifiDisplayStatus = mDisplayManager.getWifiDisplayStatus();
+        mWifiDisplayPreference = (Preference)findPreference(KEY_WIFI_DISPLAY);
+        if (mWifiDisplayStatus.getFeatureState()
+                == WifiDisplayStatus.FEATURE_STATE_UNAVAILABLE) {
+            getPreferenceScreen().removePreference(mWifiDisplayPreference);
+            mWifiDisplayPreference = null;
         }
 
-        mSunlightEnhancement = (CheckBoxPreference) findPreference(KEY_SUNLIGHT_ENHANCEMENT);
-        if (!isSunlightEnhancementSupported()) {
-            advancedPrefs.removePreference(mSunlightEnhancement);
-            mSunlightEnhancement = null;
-        }
-
-        mColorEnhancement = (CheckBoxPreference) findPreference(KEY_COLOR_ENHANCEMENT);
-        if (!isColorEnhancementSupported()) {
-            advancedPrefs.removePreference(mColorEnhancement);
-            mColorEnhancement = null;
-        }
-
-        mTapToWake = (CheckBoxPreference) findPreference(KEY_TAP_TO_WAKE);
-        if (!isTapToWakeSupported()) {
-            advancedPrefs.removePreference(mTapToWake);
-            mTapToWake = null;
-        }
-
-        boolean proximityCheckOnWait = res.getBoolean(
-                com.android.internal.R.bool.config_proximityCheckOnWake);
-        if (!proximityCheckOnWait) {
-            advancedPrefs.removePreference(findPreference(KEY_PROXIMITY_WAKE));
-            Settings.System.putInt(getContentResolver(), Settings.System.PROXIMITY_ON_WAKE, 1);
-        }
-
-        Utils.updatePreferenceToSpecificActivityFromMetaDataOrRemove(getActivity(),
-                advancedPrefs, KEY_ADVANCED_DISPLAY_SETTINGS);
-
-        mWakeWhenPluggedOrUnplugged =
-                (CheckBoxPreference) findPreference(KEY_WAKE_WHEN_PLUGGED_OR_UNPLUGGED);
-
-        if (!DisplayColor.isSupported()) {
-            advancedPrefs.removePreference(findPreference(KEY_DISPLAY_COLOR));
-        }
-        if (!DisplayGamma.isSupported()) {
-            advancedPrefs.removePreference(findPreference(KEY_DISPLAY_GAMMA));
-        }
-
-        mScreenColorSettings = (PreferenceScreen) findPreference(KEY_SCREEN_COLOR_SETTINGS);
-        if (!isPostProcessingSupported()) {
-            advancedPrefs.removePreference(mScreenColorSettings);
-        }
-
-        boolean allowsScreenOffAnimation = res.getBoolean(
-                com.android.internal.R.bool.config_screenOffAnimation);
-        boolean requiresFadeAnimation = res.getBoolean(
-                com.android.internal.R.bool.config_animateScreenLights);
-        mScreenOffAnimation = (CheckBoxPreference)
-                findPreference(KEY_SCREEN_ANIMATION_OFF);
-        mScreenAnimationStylePreference =
-                (ListPreference) findPreference(KEY_SCREEN_ANIMATION_STYLE);
-
-        if (allowsScreenOffAnimation) {
-            if (!requiresFadeAnimation) {
-                advancedPrefs.removePreference(mScreenOffAnimation);
-                final boolean animationEnabled =
-                        Settings.System.getInt(resolver,
-                                Settings.System.SCREEN_OFF_ANIMATION, 1) != 0;
-                final int currentAnimation =
-                        Settings.System.getInt(resolver, SCREEN_ANIMATION_STYLE, 0);
-
-                mScreenAnimationStylePreference.setOnPreferenceChangeListener(this);
-                if (animationEnabled) {
-                    mScreenAnimationStylePreference.setValue(String.valueOf(currentAnimation));
-                    updateScreenAnimationStylePreferenceDescription(currentAnimation + 1);
-                } else {
-                    mScreenAnimationStylePreference.setValue(String.valueOf(-1));
-                    updateScreenAnimationStylePreferenceDescription(0);
-                }
+        // Start the wake-up category handling
+        boolean removeWakeupCategory = true;
+        PreferenceCategory wakeupCategory = (PreferenceCategory)
+                    findPreference(KEY_WAKEUP_CATEGORY);
+        // Home button wake
+        mHomeWake = (CheckBoxPreference) findPreference(KEY_HOME_WAKE);
+        if (mHomeWake != null) {
+            if (!res.getBoolean(R.bool.config_show_homeWake)) {
+                wakeupCategory.removePreference(mHomeWake);
             } else {
-                advancedPrefs.removePreference(mScreenAnimationStylePreference);
+                mHomeWake.setChecked(Settings.System.getInt(resolver,
+                        Settings.System.HOME_WAKE_SCREEN, 1) == 1);
+                removeWakeupCategory = false;
             }
-        } else {
-            advancedPrefs.removePreference(mScreenAnimationStylePreference);
         }
 
-        boolean hasNotificationLed = res.getBoolean(
-                com.android.internal.R.bool.config_intrusiveNotificationLed);
-        boolean hasBatteryLed = res.getBoolean(
-                com.android.internal.R.bool.config_intrusiveBatteryLed);
-        PreferenceCategory lightPrefs = (PreferenceCategory) findPreference(CATEGORY_LIGHTS);
-
-        if (hasNotificationLed || hasBatteryLed) {
-            mBatteryPulse = (PreferenceScreen) findPreference(KEY_BATTERY_LIGHT);
-            mNotificationPulse = (PreferenceScreen) findPreference(KEY_NOTIFICATION_PULSE);
-
-            // Battery light is only for primary user
-            if (UserHandle.myUserId() != UserHandle.USER_OWNER || !hasBatteryLed) {
-                lightPrefs.removePreference(mBatteryPulse);
-                mBatteryPulse = null;
+        // Volume rocker wake
+        mVolumeWake = (CheckBoxPreference) findPreference(KEY_VOLUME_WAKE);
+        if (mVolumeWake != null) {
+            if (!res.getBoolean(R.bool.config_show_volumeRockerWake)
+                    || !Utils.hasVolumeRocker(getActivity())) {
+                wakeupCategory.removePreference(mVolumeWake);
+            } else {
+                mVolumeWake.setChecked(Settings.System.getInt(resolver,
+                        Settings.System.VOLUME_WAKE_SCREEN, 0) == 1);
+                removeWakeupCategory = false;
             }
+        }
 
-            if (!hasNotificationLed) {
-                lightPrefs.removePreference(mNotificationPulse);
-                mNotificationPulse = null;
-            }
+        // Remove the wake-up category if neither of the two items above are enabled
+        if (removeWakeupCategory) {
+            getPreferenceScreen().removePreference(wakeupCategory);
+        }
+
+        mScreenOffAnimation = (CheckBoxPreference) findPreference(KEY_SCREEN_OFF_ANIMATION);
+        if (res.getBoolean(com.android.internal.R.bool.config_screenOffAnimation)) {
+            mScreenOffAnimation.setChecked(Settings.System.getInt(resolver,
+                    Settings.System.SCREEN_OFF_ANIMATION, 1) == 1);
         } else {
-            getPreferenceScreen().removePreference(lightPrefs);
+            getPreferenceScreen().removePreference(mScreenOffAnimation);
         }
     }
 
@@ -318,44 +206,40 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
         }
 
         // We have a preference, lets update the summary
-        boolean rotationEnabled = Settings.System.getInt(getContentResolver(),
-                Settings.System.ACCELEROMETER_ROTATION, 0) != 0;
-
-        if (!rotationEnabled) {
-            mDisplayRotationPreference.setSummary(R.string.display_rotation_disabled);
-            return;
-        }
-
         StringBuilder summary = new StringBuilder();
+        Boolean rotationEnabled = Settings.System.getInt(getContentResolver(),
+                Settings.System.ACCELEROMETER_ROTATION, 0) != 0;
         int mode = Settings.System.getInt(getContentResolver(),
                 Settings.System.ACCELEROMETER_ROTATION_ANGLES,
-                DisplayRotation.ROTATION_0_MODE
-                | DisplayRotation.ROTATION_90_MODE
-                | DisplayRotation.ROTATION_270_MODE);
-        ArrayList<String> rotationList = new ArrayList<String>();
-        String delim = "";
+                DisplayRotation.ROTATION_0_MODE|DisplayRotation.ROTATION_90_MODE|DisplayRotation.ROTATION_270_MODE);
 
-        if ((mode & DisplayRotation.ROTATION_0_MODE) != 0) {
-            rotationList.add("0");
-        }
-        if ((mode & DisplayRotation.ROTATION_90_MODE) != 0) {
-            rotationList.add("90");
-        }
-        if ((mode & DisplayRotation.ROTATION_180_MODE) != 0) {
-            rotationList.add("180");
-        }
-        if ((mode & DisplayRotation.ROTATION_270_MODE) != 0) {
-            rotationList.add("270");
-        }
-        for (int i = 0; i < rotationList.size(); i++) {
-            summary.append(delim).append(rotationList.get(i));
-            if ((rotationList.size() - i) > 2) {
-                delim = ", ";
-            } else {
-                delim = " & ";
+        if (!rotationEnabled) {
+            summary.append(getString(R.string.display_rotation_disabled));
+        } else {
+            ArrayList<String> rotationList = new ArrayList<String>();
+            String delim = "";
+            if ((mode & DisplayRotation.ROTATION_0_MODE) != 0) {
+                rotationList.add(ROTATION_ANGLE_0);
             }
+            if ((mode & DisplayRotation.ROTATION_90_MODE) != 0) {
+                rotationList.add(ROTATION_ANGLE_90);
+            }
+            if ((mode & DisplayRotation.ROTATION_180_MODE) != 0) {
+                rotationList.add(ROTATION_ANGLE_180);
+            }
+            if ((mode & DisplayRotation.ROTATION_270_MODE) != 0) {
+                rotationList.add(ROTATION_ANGLE_270);
+            }
+            for (int i = 0; i < rotationList.size(); i++) {
+                summary.append(delim).append(rotationList.get(i));
+                if ((rotationList.size() - i) > 2) {
+                    delim = ", ";
+                } else {
+                    delim = " & ";
+                }
+            }
+            summary.append(" " + getString(R.string.display_rotation_unit));
         }
-        summary.append(" " + getString(R.string.display_rotation_unit));
         mDisplayRotationPreference.setSummary(summary);
     }
 
@@ -405,18 +289,13 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
             }
         }
         if (revisedEntries.size() != entries.length || revisedValues.size() != values.length) {
-            final int userPreference = Integer.parseInt(screenTimeoutPreference.getValue());
             screenTimeoutPreference.setEntries(
                     revisedEntries.toArray(new CharSequence[revisedEntries.size()]));
             screenTimeoutPreference.setEntryValues(
                     revisedValues.toArray(new CharSequence[revisedValues.size()]));
+            final int userPreference = Integer.parseInt(screenTimeoutPreference.getValue());
             if (userPreference <= maxTimeout) {
                 screenTimeoutPreference.setValue(String.valueOf(userPreference));
-            } else if (revisedValues.size() > 0
-                    && Long.parseLong(revisedValues.get(revisedValues.size() - 1).toString())
-                    == maxTimeout) {
-                // If the last one happens to be the same as the max timeout, select that
-                screenTimeoutPreference.setValue(String.valueOf(maxTimeout));
             } else {
                 // There will be no highlighted selection since nothing in the list matches
                 // maxTimeout. The user can still select anything less than maxTimeout.
@@ -426,24 +305,37 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
         screenTimeoutPreference.setEnabled(revisedEntries.size() > 0);
     }
 
-    private void updateScreenAnimationStylePreferenceDescription(int currentAnimation) {
-        ListPreference preference = mScreenAnimationStylePreference;
-        String summary;
-        if (currentAnimation < 0) {
-            // Unsupported value
-            summary = "";
-        } else {
-            final CharSequence[] entries = preference.getEntries();
-            final CharSequence[] values = preference.getEntryValues();
-            if (entries == null || entries.length == 0) {
-                summary = "";
-            } else {
-                summary = entries[currentAnimation].toString();
+    int floatToIndex(float val) {
+        String[] indices = getResources().getStringArray(R.array.entryvalues_font_size);
+        float lastVal = Float.parseFloat(indices[0]);
+        for (int i = 1; i < indices.length; i++) {
+            float thisVal = Float.parseFloat(indices[i]);
+            if (val < (lastVal + (thisVal-lastVal)*.5f)) {
+                return i - 1;
             }
+            lastVal = thisVal;
         }
-        preference.setSummary(summary);
+        return indices.length - 1;
     }
+    
+    public void readFontSizePreference(ListPreference pref) {
+        try {
+            mCurConfig.updateFrom(ActivityManagerNative.getDefault().getConfiguration());
+        } catch (RemoteException e) {
+            Log.w(TAG, "Unable to retrieve font size");
+        }
 
+        // mark the appropriate item in the preferences list
+        int index = floatToIndex(mCurConfig.fontScale);
+        pref.setValueIndex(index);
+
+        // report the current size in the summary text
+        final Resources res = getResources();
+        String[] fontSizeNames = res.getStringArray(R.array.entries_font_size);
+        pref.setSummary(String.format(res.getString(R.string.summary_font_size),
+                fontSizeNames[index]));
+    }
+    
     @Override
     public void onResume() {
         super.onResume();
@@ -452,41 +344,16 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
         RotationPolicy.registerRotationPolicyListener(getActivity(),
                 mRotationPolicyListener);
 
-        final ContentResolver resolver = getContentResolver();
-
         // Display rotation observer
-        resolver.registerContentObserver(
+        getContentResolver().registerContentObserver(
                 Settings.System.getUriFor(Settings.System.ACCELEROMETER_ROTATION), true,
                 mAccelerometerRotationObserver);
 
-        if (mAdaptiveBacklight != null) {
-            mAdaptiveBacklight.setChecked(AdaptiveBacklight.isEnabled());
+        if (mWifiDisplayPreference != null) {
+            getActivity().registerReceiver(mReceiver, new IntentFilter(
+                    DisplayManager.ACTION_WIFI_DISPLAY_STATUS_CHANGED));
+            mWifiDisplayStatus = mDisplayManager.getWifiDisplayStatus();
         }
-
-        if (mSunlightEnhancement != null) {
-            if (SunlightEnhancement.isAdaptiveBacklightRequired() &&
-                    !AdaptiveBacklight.isEnabled()) {
-                mSunlightEnhancement.setEnabled(false);
-            } else {
-                mSunlightEnhancement.setChecked(SunlightEnhancement.isEnabled());
-            }
-        }
-
-        if (mColorEnhancement != null) {
-            mColorEnhancement.setChecked(ColorEnhancement.isEnabled());
-        }
-
-        if (mTapToWake != null) {
-            mTapToWake.setChecked(TapToWake.isEnabled());
-        }
-
-        // Default value for wake-on-plug behavior from config.xml
-        boolean wakeUpWhenPluggedOrUnpluggedConfig = getResources().getBoolean(
-                com.android.internal.R.bool.config_unplugTurnsOnScreen);
-
-        mWakeWhenPluggedOrUnplugged.setChecked(Settings.Global.getInt(resolver,
-                Settings.Global.WAKE_WHEN_PLUGGED_OR_UNPLUGGED,
-                (wakeUpWhenPluggedOrUnpluggedConfig ? 1 : 0)) == 1);
 
         updateState();
     }
@@ -500,6 +367,10 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
 
         // Display rotation observer
         getContentResolver().unregisterContentObserver(mAccelerometerRotationObserver);
+
+        if (mWifiDisplayPreference != null) {
+            getActivity().unregisterReceiver(mReceiver);
+        }
     }
 
     @Override
@@ -519,8 +390,7 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
     private void updateState() {
         readFontSizePreference(mFontSizePref);
         updateScreenSaverSummary();
-        updateLightPulseSummary();
-        updateBatteryPulseSummary();
+        updateWifiDisplaySummary();
     }
 
     private void updateScreenSaverSummary() {
@@ -530,42 +400,21 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
         }
     }
 
-    private void updateLightPulseSummary() {
-        if (mNotificationPulse != null) {
-            if (Settings.System.getInt(getActivity().getContentResolver(),
-                    Settings.System.NOTIFICATION_LIGHT_PULSE, 0) == 1) {
-                mNotificationPulse.setSummary(R.string.notification_light_enabled);
-            } else {
-                mNotificationPulse.setSummary(R.string.notification_light_disabled);
+    private void updateWifiDisplaySummary() {
+        if (mWifiDisplayPreference != null) {
+            switch (mWifiDisplayStatus.getFeatureState()) {
+                case WifiDisplayStatus.FEATURE_STATE_OFF:
+                    mWifiDisplayPreference.setSummary(R.string.wifi_display_summary_off);
+                    break;
+                case WifiDisplayStatus.FEATURE_STATE_ON:
+                    mWifiDisplayPreference.setSummary(R.string.wifi_display_summary_on);
+                    break;
+                case WifiDisplayStatus.FEATURE_STATE_DISABLED:
+                default:
+                    mWifiDisplayPreference.setSummary(R.string.wifi_display_summary_disabled);
+                    break;
             }
         }
-    }
-
-    private void updateBatteryPulseSummary() {
-        if (mBatteryPulse != null) {
-            if (Settings.System.getInt(getActivity().getContentResolver(),
-                    Settings.System.BATTERY_LIGHT_ENABLED, 1) == 1) {
-                mBatteryPulse.setSummary(R.string.notification_light_enabled);
-            } else {
-                mBatteryPulse.setSummary(R.string.notification_light_disabled);
-            }
-        }
-    }
-
-    /**
-     * Reads the current font size and sets the value in the summary text
-     */
-    public void readFontSizePreference(Preference pref) {
-        try {
-            mCurConfig.updateFrom(ActivityManagerNative.getDefault().getConfiguration());
-        } catch (RemoteException e) {
-            Log.w(TAG, "Unable to retrieve font size");
-        }
-
-        // report the current size in the summary text
-        final Resources res = getResources();
-        String fontDesc = FontDialogPreference.getFontSizeDescription(res, mCurConfig.fontScale);
-        pref.setSummary(getString(R.string.summary_font_size, fontDesc));
     }
 
     public void writeFontSizePreference(Object objValue) {
@@ -579,39 +428,25 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
 
     @Override
     public boolean onPreferenceTreeClick(PreferenceScreen preferenceScreen, Preference preference) {
-        if (preference == mAdaptiveBacklight) {
-            if (mSunlightEnhancement != null &&
-                    SunlightEnhancement.isAdaptiveBacklightRequired()) {
-                mSunlightEnhancement.setEnabled(mAdaptiveBacklight.isChecked());
-            }
-            return AdaptiveBacklight.setEnabled(mAdaptiveBacklight.isChecked());
-        } else if (preference == mSunlightEnhancement) {
-            return SunlightEnhancement.setEnabled(mSunlightEnhancement.isChecked());
-        } else if (preference == mColorEnhancement) {
-            return ColorEnhancement.setEnabled(mColorEnhancement.isChecked());
-        } else if (preference == mWakeWhenPluggedOrUnplugged) {
-            Settings.Global.putInt(getContentResolver(),
-                    Settings.Global.WAKE_WHEN_PLUGGED_OR_UNPLUGGED,
-                    mWakeWhenPluggedOrUnplugged.isChecked() ? 1 : 0);
+        if (preference == mHomeWake) {
+            Settings.System.putInt(getContentResolver(), Settings.System.HOME_WAKE_SCREEN,
+                    mHomeWake.isChecked() ? 1 : 0);
             return true;
-        } else if (preference == mTapToWake) {
-            return TapToWake.setEnabled(mTapToWake.isChecked());
+        } else if (preference == mVolumeWake) {
+            Settings.System.putInt(getContentResolver(), Settings.System.VOLUME_WAKE_SCREEN,
+                    mVolumeWake.isChecked() ? 1 : 0);
+            return true;
+        } else if (preference == mScreenOffAnimation) {
+            Settings.System.putInt(getContentResolver(), Settings.System.SCREEN_OFF_ANIMATION,
+                    mScreenOffAnimation.isChecked() ? 1 : 0);
+            return true;
         }
+
         return super.onPreferenceTreeClick(preferenceScreen, preference);
     }
 
-    @Override
     public boolean onPreferenceChange(Preference preference, Object objValue) {
         final String key = preference.getKey();
-        if (KEY_EXPANDED_DESKTOP.equals(key)) {
-            int expandedDesktopValue = Integer.valueOf((String) objValue);
-            updateExpandedDesktop(expandedDesktopValue);
-        }
-        if (KEY_EXPANDED_DESKTOP_NO_NAVBAR.equals(key)) {
-            boolean value = (Boolean) objValue;
-            updateExpandedDesktop(value ? 2 : 0);
-        }
-
         if (KEY_SCREEN_TIMEOUT.equals(key)) {
             int value = Integer.parseInt((String) objValue);
             try {
@@ -624,32 +459,20 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
         if (KEY_FONT_SIZE.equals(key)) {
             writeFontSizePreference(objValue);
         }
-        if (KEY_SCREEN_ANIMATION_STYLE.equals(key)) {
-            int value = Integer.parseInt((String) objValue);
-            try {
-                if (value == -1) {
-                    // disabled
-                    Settings.System.putInt(getContentResolver(),
-                            Settings.System.SCREEN_OFF_ANIMATION, 0);
-                    updateScreenAnimationStylePreferenceDescription(0);
-                } else {
-                    // enabled
-                    Settings.System.putInt(getContentResolver(),
-                            Settings.System.SCREEN_OFF_ANIMATION, 1);
-                    Settings.System.putInt(getContentResolver(),
-                            SCREEN_ANIMATION_STYLE, value);
-
-                    // the indexing here is off by one since the first (disabled)
-                    // value is -1 and the method expects an index.
-                    updateScreenAnimationStylePreferenceDescription(value + 1);
-                }
-            } catch (NumberFormatException e) {
-                Log.e(TAG, "could not persist screen animation style setting", e);
-            }
-        }
 
         return true;
     }
+
+    private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.getAction().equals(DisplayManager.ACTION_WIFI_DISPLAY_STATUS_CHANGED)) {
+                mWifiDisplayStatus = (WifiDisplayStatus)intent.getParcelableExtra(
+                        DisplayManager.EXTRA_WIFI_DISPLAY_STATUS);
+                updateWifiDisplaySummary();
+            }
+        }
+    };
 
     @Override
     public boolean onPreferenceClick(Preference preference) {
@@ -662,130 +485,5 @@ public class DisplaySettings extends SettingsPreferenceFragment implements
             }
         }
         return false;
-    }
-
-    /**
-     * Restore the properties associated with this preference on boot
-     * @param ctx A valid context
-     */
-    public static void restore(Context ctx) {
-        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ctx);
-        if (isAdaptiveBacklightSupported()) {
-            final boolean enabled = prefs.getBoolean(KEY_ADAPTIVE_BACKLIGHT,
-                    AdaptiveBacklight.isEnabled());
-            if (!AdaptiveBacklight.setEnabled(enabled)) {
-                Log.e(TAG, "Failed to restore adaptive backlight settings.");
-            } else {
-                Log.d(TAG, "Adaptive backlight settings restored.");
-            }
-        }
-
-        if (isSunlightEnhancementSupported()) {
-            final boolean enabled = prefs.getBoolean(KEY_SUNLIGHT_ENHANCEMENT,
-                    SunlightEnhancement.isEnabled());
-            if (SunlightEnhancement.isAdaptiveBacklightRequired() &&
-                    !AdaptiveBacklight.isEnabled()) {
-                SunlightEnhancement.setEnabled(false);
-                Log.d(TAG, "SRE requires CABC, disabled");
-            } else {
-                if (!SunlightEnhancement.setEnabled(enabled)) {
-                    Log.e(TAG, "Failed to restore SRE settings.");
-                } else {
-                    Log.d(TAG, "SRE settings restored.");
-                }
-            }
-        }
-
-        if (isColorEnhancementSupported()) {
-            final boolean enabled = prefs.getBoolean(KEY_COLOR_ENHANCEMENT,
-                    ColorEnhancement.isEnabled());
-            if (!ColorEnhancement.setEnabled(enabled)) {
-                Log.e(TAG, "Failed to restore color enhancement settings.");
-            } else {
-                Log.d(TAG, "Color enhancement settings restored.");
-            }
-        }
-
-        if (isTapToWakeSupported()) {
-            final boolean enabled = prefs.getBoolean(KEY_TAP_TO_WAKE,
-                    TapToWake.isEnabled());
-            if (!TapToWake.setEnabled(enabled)) {
-                Log.e(TAG, "Failed to restore tap-to-wake settings.");
-            } else {
-                Log.d(TAG, "Tap-to-wake settings restored.");
-            }
-        }
-    }
-
-    private boolean isPostProcessingSupported() {
-        boolean ret = true;
-        final PackageManager pm = getPackageManager();
-        try {
-            pm.getPackageInfo("com.qualcomm.display", PackageManager.GET_META_DATA);
-        } catch (NameNotFoundException e) {
-            ret = false;
-        }
-        return ret;
-    }
-
-    private static boolean isAdaptiveBacklightSupported() {
-        try {
-            return AdaptiveBacklight.isSupported();
-        } catch (NoClassDefFoundError e) {
-            // Hardware abstraction framework not installed
-            return false;
-        }
-    }
-
-    private static boolean isSunlightEnhancementSupported() {
-        try {
-            return SunlightEnhancement.isSupported();
-        } catch (NoClassDefFoundError e) {
-            // Hardware abstraction framework not installed
-            return false;
-        }
-    }
-
-    private static boolean isColorEnhancementSupported() {
-        try {
-            return ColorEnhancement.isSupported();
-        } catch (NoClassDefFoundError e) {
-            // Hardware abstraction framework not installed
-            return false;
-        }
-    }
-
-    private static boolean isTapToWakeSupported() {
-        try {
-            return TapToWake.isSupported();
-        } catch (NoClassDefFoundError e) {
-            // Hardware abstraction framework not installed
-            return false;
-        }
-    }
-
-    private void updateExpandedDesktop(int value) {
-        ContentResolver cr = getContentResolver();
-        Resources res = getResources();
-        int summary = -1;
-
-        Settings.System.putInt(cr, Settings.System.EXPANDED_DESKTOP_STYLE, value);
-
-        if (value == 0) {
-            // Expanded desktop deactivated
-            Settings.System.putInt(cr, Settings.System.POWER_MENU_EXPANDED_DESKTOP_ENABLED, 0);
-            Settings.System.putInt(cr, Settings.System.EXPANDED_DESKTOP_STATE, 0);
-            summary = R.string.expanded_desktop_disabled;
-        } else if (value == 1) {
-            Settings.System.putInt(cr, Settings.System.POWER_MENU_EXPANDED_DESKTOP_ENABLED, 1);
-            summary = R.string.expanded_desktop_status_bar;
-        } else if (value == 2) {
-            Settings.System.putInt(cr, Settings.System.POWER_MENU_EXPANDED_DESKTOP_ENABLED, 1);
-            summary = R.string.expanded_desktop_no_status_bar;
-        }
-
-        if (mExpandedDesktopPref != null && summary != -1) {
-            mExpandedDesktopPref.setSummary(res.getString(summary));
-        }
     }
 }

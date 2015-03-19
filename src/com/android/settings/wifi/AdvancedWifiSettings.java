@@ -28,7 +28,6 @@ import android.preference.Preference;
 import android.preference.PreferenceScreen;
 import android.provider.Settings;
 import android.provider.Settings.Global;
-import android.security.Credentials;
 import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Toast;
@@ -48,8 +47,6 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
     private static final String KEY_NOTIFY_OPEN_NETWORKS = "notify_open_networks";
     private static final String KEY_SLEEP_POLICY = "sleep_policy";
     private static final String KEY_POOR_NETWORK_DETECTION = "wifi_poor_network_detection";
-    private static final String KEY_SCAN_ALWAYS_AVAILABLE = "wifi_scan_always_available";
-    private static final String KEY_INSTALL_CREDENTIALS = "install_credentials";
     private static final String KEY_SUSPEND_OPTIMIZATIONS = "suspend_optimizations";
     private static final String KEY_WIFI_PRIORITY = "wifi_priority";
 
@@ -94,18 +91,6 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
             }
         }
 
-        CheckBoxPreference scanAlwaysAvailable =
-            (CheckBoxPreference) findPreference(KEY_SCAN_ALWAYS_AVAILABLE);
-        scanAlwaysAvailable.setChecked(Global.getInt(getContentResolver(),
-                    Global.WIFI_SCAN_ALWAYS_AVAILABLE, 0) == 1);
-
-        Intent intent=new Intent(Credentials.INSTALL_AS_USER_ACTION);
-        intent.setClassName("com.android.certinstaller",
-                "com.android.certinstaller.CertInstallerMain");
-        intent.putExtra(Credentials.EXTRA_INSTALL_AS_UID, android.os.Process.WIFI_UID);
-        Preference pref = findPreference(KEY_INSTALL_CREDENTIALS);
-        pref.setIntent(intent);
-
         CheckBoxPreference suspendOptimizations =
             (CheckBoxPreference) findPreference(KEY_SUSPEND_OPTIMIZATIONS);
         suspendOptimizations.setChecked(Global.getInt(getContentResolver(),
@@ -115,20 +100,11 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
 
         if (mWifiManager.isDualBandSupported()) {
             frequencyPref.setOnPreferenceChangeListener(this);
-            try {
-                int value = Settings.Global.getInt(getContentResolver(),
-                Global.WIFI_FREQUENCY_BAND);
-                if (value != -1) {
-                    frequencyPref.setValue(String.valueOf(value));
-                    updateFrequencyBandSummary(frequencyPref, value);
-
-                    // make sure this frequeny band is in use
-                    if (mWifiManager.getFrequencyBand() != value)
-                        mWifiManager.setFrequencyBand(value, true);
-
-                }
-            } catch(Settings.SettingNotFoundException e) {
-                Log.e(TAG, "Failed to fetch frequency band:" + e.getMessage());
+            int value = mWifiManager.getFrequencyBand();
+            if (value != -1) {
+                frequencyPref.setValue(String.valueOf(value));
+            } else {
+                Log.e(TAG, "Failed to fetch frequency band");
             }
         } else {
             if (frequencyPref != null) {
@@ -140,17 +116,9 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
         ListPreference ccodePref = (ListPreference) findPreference(KEY_COUNTRY_CODE);
         if (ccodePref != null) {
             ccodePref.setOnPreferenceChangeListener(this);
-            String value = Settings.Global.getString(getContentResolver(),
-            Settings.Global.WIFI_COUNTRY_CODE);
+            String value = mWifiManager.getCountryCode();
             if (value != null) {
                 ccodePref.setValue(value);
-
-                // make sure this country code is in use
-                String ccode = mWifiManager.getCountryCode();
-                if (ccode != null) {
-                    if (!ccode.equals(value))
-                        mWifiManager.setCountryCode(value, true);
-                }
             } else {
                 Log.e(TAG, "Failed to fetch country code");
             }
@@ -194,11 +162,6 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
         Log.e(TAG, "Invalid sleep policy value: " + value);
     }
 
-    private void updateFrequencyBandSummary(Preference frequencyBandPref, int index) {
-        String[] summaries = getResources().getStringArray(R.array.wifi_frequency_band_entries);
-        frequencyBandPref.setSummary(summaries[index]);
-    }
-
     @Override
     public boolean onPreferenceTreeClick(PreferenceScreen screen, Preference preference) {
         String key = preference.getKey();
@@ -215,10 +178,6 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
             Global.putInt(getContentResolver(),
                     Global.WIFI_SUSPEND_OPTIMIZATIONS_ENABLED,
                     ((CheckBoxPreference) preference).isChecked() ? 1 : 0);
-        } else if (KEY_SCAN_ALWAYS_AVAILABLE.equals(key)) {
-            Global.putInt(getContentResolver(),
-                    Global.WIFI_SCAN_ALWAYS_AVAILABLE,
-                    ((CheckBoxPreference) preference).isChecked() ? 1 : 0);
         } else {
             return super.onPreferenceTreeClick(screen, preference);
         }
@@ -231,11 +190,7 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
 
         if (KEY_FREQUENCY_BAND.equals(key)) {
             try {
-                int value = Integer.parseInt((String) newValue);
-                Settings.Global.putInt(getContentResolver(), Settings.Global.WIFI_FREQUENCY_BAND,
-                        value);
-                mWifiManager.setFrequencyBand(value, true);
-                updateFrequencyBandSummary(preference, value);
+                mWifiManager.setFrequencyBand(Integer.parseInt((String) newValue), true);
             } catch (NumberFormatException e) {
                 Toast.makeText(getActivity(), R.string.wifi_setting_frequency_band_error,
                         Toast.LENGTH_SHORT).show();
@@ -245,8 +200,6 @@ public class AdvancedWifiSettings extends SettingsPreferenceFragment
 
         if (KEY_COUNTRY_CODE.equals(key)) {
             try {
-                Settings.Global.putString(getContentResolver(), Settings.Global.WIFI_COUNTRY_CODE,
-                        (String) newValue);
                 mWifiManager.setCountryCode((String) newValue, true);
             } catch (IllegalArgumentException e) {
                 Toast.makeText(getActivity(), R.string.wifi_setting_countrycode_error,

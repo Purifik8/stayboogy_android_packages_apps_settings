@@ -19,56 +19,35 @@
     android:title="@string/performance_settings_title"
     xmlns:settings="http://schemas.android.com/apk/res/com.android.settings">
 
-    <PreferenceCategory
-        android:key="perf_profile_prefs"
-        android:title="@string/title_tile_performance_profile">
+    <PreferenceScreen
+        android:key="processor"
+        android:fragment="com.android.settings.cyanogenmod.Processor"
+        android:title="@string/processor_title"
+        android:summary="@string/processor_summary" />
 
-        <ListPreference
-            android:key="pref_perf_profile"
-            android:dialogTitle="@string/perf_profile_title"
-            android:title="@string/perf_profile_title"
-            android:persistent="false" />
+    <PreferenceScreen
+        android:key="ioscheduler"
+        android:fragment="com.android.settings.cyanogenmod.IOScheduler"
+        android:title="@string/io_scheds_title"
+        android:summary="@string/io_scheds_summary" />
 
-        <com.android.settings.cyanogenmod.SecureSettingCheckBoxPreference
-            android:key="app_perf_profiles_enabled"
-            android:title="@string/autoperf_title"
-            android:summary="@string/autoperf_summary"
-            android:defaultValue="true" />
-    </PreferenceCategory>
+    <PreferenceScreen
+        android:key="memory_management"
+        android:fragment="com.android.settings.cyanogenmod.MemoryManagement"
+        android:title="@string/memory_management_title"
+        android:summary="@string/memory_management_summary" />
 
-    <PreferenceCategory
-        android:key="perf_system_prefs"
-        android:title="@string/accessibility_system_title">
+    <CheckBoxPreference
+        android:key="pref_use_16bpp_alpha"
+        android:title="@string/pref_use_16bpp_alpha_title"
+        android:summary="@string/pref_use_16bpp_alpha_summary" />
 
-        <PreferenceScreen
-            android:key="processor"
-            android:fragment="com.android.settings.cyanogenmod.Processor"
-            android:title="@string/processor_title" />
-
-        <PreferenceScreen
-            android:key="ioscheduler"
-            android:fragment="com.android.settings.cyanogenmod.IOScheduler"
-            android:title="@string/io_scheds_title" />
-
-        <PreferenceScreen
-            android:key="memory_management"
-            android:fragment="com.android.settings.cyanogenmod.MemoryManagement"
-            android:title="@string/memory_management_title" />
-    </PreferenceCategory>
-
-    <PreferenceCategory
-        android:key="perf_graphics_prefs"
-        android:title="@string/graphics_title">
-
-        <CheckBoxPreference
-            android:key="pref_use_16bpp_alpha"
-            android:title="@string/pref_use_16bpp_alpha_title"
-            android:summary="@string/pref_use_16bpp_alpha_summary" />
-
-        <CheckBoxPreference
-            android:key="pref_force_highend_gfx"
-            android:title="@string/pref_force_highend_gfx_title"
-            android:summary="@string/pref_force_highend_gfx_summary" />
-    </PreferenceCategory>
+    <ListPreference
+        android:key="pref_use_dithering"
+        android:persistent="false"
+        android:dialogTitle="@string/pref_use_dithering_title"
+        android:title="@string/pref_use_dithering_title"
+        android:entries="@array/dithering_entries"
+        android:entryValues="@array/dithering_values"/>
 
 </PreferenceScreen>

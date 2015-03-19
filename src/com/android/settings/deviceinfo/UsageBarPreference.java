@@ -16,6 +16,9 @@
 
 package com.android.settings.deviceinfo;
 
+import com.android.settings.R;
+import com.google.common.collect.Lists;
+
 import android.content.Context;
 import android.os.Handler;
 import android.preference.Preference;
@@ -25,9 +28,8 @@ import android.view.View.OnClickListener;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 
-import com.android.settings.R;
-import com.google.android.collect.Lists;
-
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 

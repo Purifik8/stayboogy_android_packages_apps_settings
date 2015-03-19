@@ -54,7 +54,6 @@ import java.util.ArrayList;
 import java.util.Locale;
 
 import com.android.settings.R;
-import com.android.settings.widget.CubicSplinePreviewView;
 
 public class AutoBrightnessCustomizeDialog extends AlertDialog
         implements DialogInterface.OnClickListener, DialogInterface.OnDismissListener {
@@ -368,7 +367,8 @@ public class AutoBrightnessCustomizeDialog extends AlertDialog
         for (int i = 0; i < n; i++) {
             SettingRow row = mAdapter.getItem(i);
             x[i] = row.lux;
-            y[i] = brightnessToPercent(row.backlight) / 100F;
+            //XXX: should mMinLevel be treated as 0 in the preview?
+            y[i] = (float) row.backlight / PowerManager.BRIGHTNESS_ON;
         }
 
         final View v = getLayoutInflater().inflate(R.layout.auto_brightness_preview, null);
@@ -542,8 +542,7 @@ public class AutoBrightnessCustomizeDialog extends AlertDialog
             if (which == DialogInterface.BUTTON_POSITIVE) {
                 try {
                     int newLux = Integer.valueOf(mLuxInput.getText().toString());
-                    int newBacklight = (int) progressToBrightness(mBacklightBar.getProgress());
-                    mAdapter.updateRow(mPosition, newLux, newBacklight);
+                    mAdapter.setLuxForRow(mPosition, newLux);
                 } catch (NumberFormatException e) {
                     //ignored
                 }
@@ -787,22 +786,15 @@ public class AutoBrightnessCustomizeDialog extends AlertDialog
             sanitizeValuesAndNotify();
         }
 
-        public void updateRow(final int position, int newLux, int newBacklight) {
+        public void setLuxForRow(final int position, int newLux) {
             final SettingRow row = getItem(position);
-            boolean changed = false;
 
-            if (!isLastItem(position) && row.lux != newLux) {
-                row.lux = newLux;
-                changed = true;
-            }
-            if (row.backlight != newBacklight) {
-                row.backlight = newBacklight;
-                changed = true;
+            if (isLastItem(position) || row.lux == newLux) {
+                return;
             }
 
-            if (changed) {
-                sanitizeValuesAndNotify();
-            }
+            row.lux = newLux;
+            sanitizeValuesAndNotify();
         }
 
         public void sanitizeValuesAndNotify() {

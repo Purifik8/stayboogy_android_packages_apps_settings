@@ -20,11 +20,10 @@ import java.util.UUID;
 
 import android.app.Profile;
 import android.app.ProfileManager;
-import android.content.Context;
 import android.os.Bundle;
 import android.preference.Preference;
 import android.preference.PreferenceScreen;
-import android.text.TextUtils;
+import android.provider.Settings;
 
 import com.android.settings.R;
 import com.android.settings.SettingsPreferenceFragment;
@@ -34,14 +33,24 @@ public class ProfilesList extends SettingsPreferenceFragment implements
         Preference.OnPreferenceChangeListener {
     static final String TAG = "ProfilesSettings";
 
+    public static final String EXTRA_POSITION = "position";
+    public static final String PROFILE_SERVICE = "profile";
+    public static final String RESTORE_CARRIERS_URI = "content://telephony/carriers/restore";
+    public static final String PREFERRED_APN_URI = "content://telephony/carriers/preferapn";
+
+    private String mSelectedKey;
+
     private ProfileManager mProfileManager;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        addPreferencesFromResource(R.xml.profiles_settings);
-        mProfileManager = (ProfileManager) getActivity().getSystemService(Context.PROFILE_SERVICE);
+        if (getPreferenceManager() != null) {
+            addPreferencesFromResource(R.xml.profiles_settings);
+            mProfileManager = (ProfileManager) getActivity().getSystemService(PROFILE_SERVICE);
+
+        }
     }
 
     @Override
@@ -56,32 +65,51 @@ public class ProfilesList extends SettingsPreferenceFragment implements
     }
 
     public void refreshList() {
+        // Only enable the preferences if system profiles are enabled
+        boolean enabled = Settings.System.getInt(getActivity().getContentResolver(),
+                Settings.System.SYSTEM_PROFILES_ENABLED, 1) == 1;
+
         PreferenceScreen plist = getPreferenceScreen();
-        plist.removeAll();
+        if (plist != null) {
+            plist.removeAll();
 
-        // Get active profile, if null
-        Profile prof = mProfileManager.getActiveProfile();
-        String selectedKey = prof != null ? prof.getUuid().toString() : null;
+            if (enabled && mProfileManager != null) {
+                // Get active profile, if null
+                Profile prof = mProfileManager.getActiveProfile();
+                mSelectedKey = prof != null ? prof.getUuid().toString() : null;
 
-        for (Profile profile : mProfileManager.getProfiles()) {
-            Bundle args = new Bundle();
-            args.putParcelable(ProfilesSettings.EXTRA_PROFILE, profile);
-            args.putBoolean(ProfilesSettings.EXTRA_NEW_PROFILE, false);
+                for(Profile profile : mProfileManager.getProfiles()) {
+                    Bundle args = new Bundle();
+                    args.putParcelable("Profile", profile);
 
-            ProfilesPreference ppref = new ProfilesPreference(this, args);
-            ppref.setKey(profile.getUuid().toString());
-            ppref.setTitle(profile.getName());
-            ppref.setPersistent(false);
-            ppref.setOnPreferenceChangeListener(this);
-            ppref.setSelectable(true);
-            ppref.setEnabled(true);
+                    ProfilesPreference ppref = new ProfilesPreference(this, args);
+                    ppref.setKey(profile.getUuid().toString());
+                    ppref.setTitle(profile.getName());
+                    ppref.setPersistent(false);
+                    ppref.setOnPreferenceChangeListener(this);
+                    ppref.setSelectable(true);
+                    ppref.setEnabled(true);
 
-            if (TextUtils.equals(selectedKey, ppref.getKey())) {
-                ppref.setChecked(true);
+                    if ((mSelectedKey != null) && mSelectedKey.equals(ppref.getKey())) {
+                        ppref.setChecked(true);
+                    }
+
+                    plist.addPreference(ppref);
+                }
+            } else {
+                // Not enabled, display a message preference
+                Preference npref = new Preference(getActivity());
+                npref.setLayoutResource(R.layout.preference_empty_list);
+                npref.setTitle(R.string.profile_empty_list_profiles_off);
+                npref.setEnabled(false);
+
+                plist.addPreference(npref);
             }
-
-            plist.addPreference(ppref);
         }
+    }
+
+    public boolean onPreferenceTreeClick(PreferenceScreen preferenceScreen, Preference preference) {
+            return super.onPreferenceTreeClick(preferenceScreen, preference);
     }
 
     public boolean onPreferenceChange(Preference preference, Object newValue) {
@@ -96,6 +124,7 @@ public class ProfilesList extends SettingsPreferenceFragment implements
         try {
             UUID selectedUuid = UUID.fromString(key);
             mProfileManager.setActiveProfile(selectedUuid);
+            mSelectedKey = key;
         } catch (IllegalArgumentException ex) {
             ex.printStackTrace();
         }

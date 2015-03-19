@@ -25,7 +25,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.ImageView;
+import android.widget.ListView;
 import android.widget.TextView;
 
 import com.android.settings.R;
@@ -80,13 +80,13 @@ public class WifiPriority extends ListFragment {
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
-        Context context = getActivity();
-        mWifiManager = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+        Context ctx = getActivity().getApplicationContext();
+        mWifiManager = (WifiManager)ctx.getSystemService(Context.WIFI_SERVICE);
 
         // Set the touchable listview
         mNetworksListView = (TouchInterceptor)getListView();
         mNetworksListView.setDropListener(mDropListener);
-        mAdapter = new WifiPriorityAdapter(context, mWifiManager);
+        mAdapter = new WifiPriorityAdapter(ctx, mWifiManager);
         setListAdapter(mAdapter);
     }
 
@@ -162,21 +162,12 @@ public class WifiPriority extends ListFragment {
         public View getView(int position, View convertView, ViewGroup parent) {
             final View v;
             if (convertView == null) {
-                v = mInflater.inflate(R.layout.wifi_network_priority_list_item, null);
+                v = mInflater.inflate(R.layout.order_power_widget_button_list_item, null);
             } else {
                 v = convertView;
             }
 
             WifiConfiguration network = (WifiConfiguration)getItem(position);
-
-            final ImageView icon = (ImageView) v.findViewById(R.id.icon);
-            if (network.getAuthType() != WifiConfiguration.KeyMgmt.NONE) {
-                icon.setImageDrawable(getActivity().getResources().getDrawable(
-                        R.drawable.wifi_signal_lock_dark));
-            } else {
-                icon.setImageDrawable(getActivity().getResources().getDrawable(
-                        R.drawable.wifi_signal_dark));
-            }
 
             final TextView name = (TextView) v.findViewById(R.id.name);
             // wpa_suplicant returns the SSID between double quotes. Remove them if are present.

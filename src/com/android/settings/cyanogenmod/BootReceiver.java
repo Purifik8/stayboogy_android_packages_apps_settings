@@ -24,14 +24,8 @@ import android.os.SystemProperties;
 import android.preference.PreferenceManager;
 import android.util.Log;
 
-import com.android.settings.DisplaySettings;
 import com.android.settings.R;
 import com.android.settings.Utils;
-import com.android.settings.cyanogenmod.ButtonSettings;
-import com.android.settings.hardware.DisplayColor;
-import com.android.settings.hardware.DisplayGamma;
-import com.android.settings.hardware.VibratorIntensity;
-import com.android.settings.location.LocationSettings;
 
 import java.util.Arrays;
 import java.util.List;
@@ -44,43 +38,33 @@ public class BootReceiver extends BroadcastReceiver {
     private static final String IOSCHED_SETTINGS_PROP = "sys.iosched.restored";
     private static final String KSM_SETTINGS_PROP = "sys.ksm.restored";
 
-    private static final String ENCRYPTED_STATE = "1";
-
     @Override
     public void onReceive(Context ctx, Intent intent) {
-        if (intent.getAction().equals(Intent.ACTION_BOOT_COMPLETED)
-                && !ENCRYPTED_STATE.equals(SystemProperties.get("vold.decrypt"))) {
-            if (SystemProperties.getBoolean(CPU_SETTINGS_PROP, false) == false) {
-                SystemProperties.set(CPU_SETTINGS_PROP, "true");
-                configureCPU(ctx);
-            } else {
-                SystemProperties.set(CPU_SETTINGS_PROP, "false");
-            }
-
-            if (SystemProperties.getBoolean(IOSCHED_SETTINGS_PROP, false) == false) {
-                SystemProperties.set(IOSCHED_SETTINGS_PROP, "true");
-                configureIOSched(ctx);
-            } else {
-                SystemProperties.set(IOSCHED_SETTINGS_PROP, "false");
-            }
-
-            if (Utils.fileExists(MemoryManagement.KSM_RUN_FILE)) {
-                if (SystemProperties.getBoolean(KSM_SETTINGS_PROP, false) == false) {
-                    SystemProperties.set(KSM_SETTINGS_PROP, "true");
-                    configureKSM(ctx);
-                } else {
-                    SystemProperties.set(KSM_SETTINGS_PROP, "false");
-                }
-            }
+        if (SystemProperties.getBoolean(CPU_SETTINGS_PROP, false) == false
+                && intent.getAction().equals(Intent.ACTION_BOOT_COMPLETED)) {
+            SystemProperties.set(CPU_SETTINGS_PROP, "true");
+            configureCPU(ctx);
+        } else {
+            SystemProperties.set(CPU_SETTINGS_PROP, "false");
         }
 
-        /* Restore the hardware tunable values */
-        DisplayColor.restore(ctx);
-        DisplayGamma.restore(ctx);
-        VibratorIntensity.restore(ctx);
-        DisplaySettings.restore(ctx);
-        LocationSettings.restore(ctx);
-        ButtonSettings.restoreKeyDisabler(ctx);
+        if (SystemProperties.getBoolean(IOSCHED_SETTINGS_PROP, false) == false
+                && intent.getAction().equals(Intent.ACTION_BOOT_COMPLETED)) {
+            SystemProperties.set(IOSCHED_SETTINGS_PROP, "true");
+            configureIOSched(ctx);
+        } else {
+            SystemProperties.set(IOSCHED_SETTINGS_PROP, "false");
+        }
+
+        if (Utils.fileExists(MemoryManagement.KSM_RUN_FILE)) {
+            if (SystemProperties.getBoolean(KSM_SETTINGS_PROP, false) == false
+                    && intent.getAction().equals(Intent.ACTION_BOOT_COMPLETED)) {
+                SystemProperties.set(KSM_SETTINGS_PROP, "true");
+                configureKSM(ctx);
+            } else {
+                SystemProperties.set(KSM_SETTINGS_PROP, "false");
+            }
+        }
     }
 
     private void initFreqCapFiles(Context ctx)
@@ -95,7 +79,7 @@ public class BootReceiver extends BroadcastReceiver {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ctx);
 
         if (prefs.getBoolean(Processor.SOB_PREF, false) == false) {
-            Log.i(TAG, "CPU restore disabled by user preference.");
+            Log.i(TAG, "Restore disabled by user preference.");
             return;
         }
 
@@ -136,7 +120,7 @@ public class BootReceiver extends BroadcastReceiver {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ctx);
 
         if (prefs.getBoolean(IOScheduler.SOB_PREF, false) == false) {
-            Log.i(TAG, "IOSched restore disabled by user preference.");
+            Log.i(TAG, "Restore disabled by user preference.");
             return;
         }
 
@@ -161,8 +145,7 @@ public class BootReceiver extends BroadcastReceiver {
     private void configureKSM(Context ctx) {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ctx);
 
-        boolean ksmDefault = (SystemProperties.get("ro.ksm.default", "0") != "0");
-        boolean ksm = prefs.getBoolean(MemoryManagement.KSM_PREF, ksmDefault);
+        boolean ksm = prefs.getBoolean(MemoryManagement.KSM_PREF, false);
 
         Utils.fileWriteOneLine(MemoryManagement.KSM_RUN_FILE, ksm ? "1" : "0");
         Log.d(TAG, "KSM settings restored.");

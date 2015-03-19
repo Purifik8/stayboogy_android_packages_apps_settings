@@ -16,26 +16,22 @@
 
 package com.android.settings.bluetooth;
 
-import static android.os.UserManager.DISALLOW_CONFIG_BLUETOOTH;
-
 import android.app.AlertDialog;
-import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.Intent;
-import android.content.IntentFilter;
-import android.os.UserManager;
+import android.graphics.drawable.Drawable;
 import android.preference.Preference;
 import android.text.Html;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.ViewGroup;
 import android.widget.ImageView;
 
 import com.android.settings.R;
@@ -58,10 +54,6 @@ public final class BluetoothDevicePreference extends Preference implements
 
     private AlertDialog mDisconnectDialog;
 
-    private Context mContext;
-
-    private static final int OK_BUTTON = -1;
-
     public BluetoothDevicePreference(Context context, CachedBluetoothDevice cachedDevice) {
         super(context);
 
@@ -74,10 +66,7 @@ public final class BluetoothDevicePreference extends Preference implements
         mCachedDevice = cachedDevice;
 
         if (cachedDevice.getBondState() == BluetoothDevice.BOND_BONDED) {
-            UserManager um = (UserManager) context.getSystemService(Context.USER_SERVICE);
-            if (! um.hasUserRestriction(DISALLOW_CONFIG_BLUETOOTH)) {
-                setWidgetLayoutResource(R.layout.preference_bluetooth);
-            }
+            setWidgetLayoutResource(R.layout.preference_bluetooth);
         }
 
         mCachedDevice.registerCallback(this);
@@ -195,32 +184,21 @@ public final class BluetoothDevicePreference extends Preference implements
 
     // Show disconnect confirmation dialog for a device.
     private void askDisconnect() {
-        mContext = getContext();
+        Context context = getContext();
         String name = mCachedDevice.getName();
         if (TextUtils.isEmpty(name)) {
-            name = mContext.getString(R.string.bluetooth_device);
+            name = context.getString(R.string.bluetooth_device);
         }
-        String message = mContext.getString(R.string.bluetooth_disconnect_all_profiles, name);
-        String title = mContext.getString(R.string.bluetooth_disconnect_title);
-
-        IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
-        mContext.registerReceiver(mBluetoothReceiver, filter);
+        String message = context.getString(R.string.bluetooth_disconnect_all_profiles, name);
+        String title = context.getString(R.string.bluetooth_disconnect_title);
 
         DialogInterface.OnClickListener disconnectListener = new DialogInterface.OnClickListener() {
             public void onClick(DialogInterface dialog, int which) {
-                // Disconnect only when user has selected OK
-                if (which == OK_BUTTON) {
-                    mCachedDevice.disconnect();
-                }
-                try {
-                    mContext.unregisterReceiver(mBluetoothReceiver);
-                } catch(IllegalArgumentException e) {
-                    Log.e(TAG, "mBluetoothReceiver already unregistered");
-                }
+                mCachedDevice.disconnect();
             }
         };
 
-        mDisconnectDialog = Utils.showDisconnectDialog(mContext,
+        mDisconnectDialog = Utils.showDisconnectDialog(context,
                 mDisconnectDialog, disconnectListener, title, Html.fromHtml(message));
     }
 
@@ -251,7 +229,7 @@ public final class BluetoothDevicePreference extends Preference implements
                     break;
 
                 case BluetoothProfile.STATE_DISCONNECTED:
-                    if (profile.isProfileReady()) {
+                    if (profile.isProfileReady() && profile.isPreferred(cachedDevice.getDevice())) {
                         if (profile instanceof A2dpProfile) {
                             a2dpNotConnected = true;
                         } else if (profile instanceof HeadsetProfile) {
@@ -326,22 +304,4 @@ public final class BluetoothDevicePreference extends Preference implements
         }
         return 0;
     }
-
-    private final BroadcastReceiver mBluetoothReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
-                switch (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
-                    case BluetoothAdapter.STATE_TURNING_OFF:
-                        Log.v(TAG, "Receiver DISABLED_ACTION ");
-                        if (mDisconnectDialog != null && mDisconnectDialog.isShowing()) {
-                            mDisconnectDialog.dismiss();
-                        }
-                        mContext.unregisterReceiver(mBluetoothReceiver);
-                        break;
-                }
-            }
-        }
-    };
 }

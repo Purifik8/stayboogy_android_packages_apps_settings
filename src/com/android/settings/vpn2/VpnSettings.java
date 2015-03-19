@@ -66,8 +66,6 @@ public class VpnSettings extends SettingsPreferenceFragment implements
 
     private static final String TAG_LOCKDOWN = "lockdown";
 
-    private static final String EXTRA_PICK_LOCKDOWN = "android.net.vpn.PICK_LOCKDOWN";
-
     // TODO: migrate to using DialogFragment when editing
 
     private final IConnectivityManager mService = IConnectivityManager.Stub
@@ -156,14 +154,8 @@ public class VpnSettings extends SettingsPreferenceFragment implements
     public void onResume() {
         super.onResume();
 
-        final boolean pickLockdown = getActivity()
-                .getIntent().getBooleanExtra(EXTRA_PICK_LOCKDOWN, false);
-        if (pickLockdown) {
-            LockdownConfigFragment.show(this);
-        }
-
         // Check KeyStore here, so others do not need to deal with it.
-        if (!mKeyStore.isUnlocked()) {
+        if (mKeyStore.state() != KeyStore.State.UNLOCKED) {
             if (!mUnlocking) {
                 // Let us unlock KeyStore. See you later!
                 Credentials.getInstance().unlock(getActivity());
@@ -237,8 +229,7 @@ public class VpnSettings extends SettingsPreferenceFragment implements
         if (button == DialogInterface.BUTTON_POSITIVE) {
             // Always save the profile.
             VpnProfile profile = mDialog.getProfile();
-            mKeyStore.put(Credentials.VPN + profile.key, profile.encode(), KeyStore.UID_SELF,
-                    KeyStore.FLAG_ENCRYPTED);
+            mKeyStore.put(Credentials.VPN + profile.key, profile.encode());
 
             // Update the preference.
             VpnPreference preference = mPreferences.get(profile.key);
@@ -531,8 +522,7 @@ public class VpnSettings extends SettingsPreferenceFragment implements
                                     Toast.LENGTH_LONG).show();
                             return;
                         }
-                        keyStore.put(Credentials.LOCKDOWN_VPN, profile.key.getBytes(),
-                                KeyStore.UID_SELF, KeyStore.FLAG_ENCRYPTED);
+                        keyStore.put(Credentials.LOCKDOWN_VPN, profile.key.getBytes());
                     }
 
                     // kick profiles since we changed them

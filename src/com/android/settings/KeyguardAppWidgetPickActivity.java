@@ -39,14 +39,12 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
-import android.os.UserHandle;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.IWindowManager;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.GridView;
@@ -90,8 +88,6 @@ public class KeyguardAppWidgetPickActivity extends Activity
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        getWindow().addPrivateFlags(
-                WindowManager.LayoutParams.PRIVATE_FLAG_INHERIT_TRANSLUCENT_DECOR);
         setContentView(R.layout.keyguard_appwidget_picker_layout);
         super.onCreate(savedInstanceState);
 
@@ -123,9 +119,6 @@ public class KeyguardAppWidgetPickActivity extends Activity
         mAppWidgetAdapter = new AppWidgetAdapter(this, mItems);
         mGridView.setAdapter(mAppWidgetAdapter);
         mGridView.setOnItemClickListener(this);
-        mGridView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
 
         mLockPatternUtils = new LockPatternUtils(this); // TEMP-- we want to delete this
     }
@@ -522,11 +515,7 @@ public class KeyguardAppWidgetPickActivity extends Activity
                 if (mAddingToKeyguard && mAppWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
                     // Found in KeyguardHostView.java
                     final int KEYGUARD_HOST_ID = 0x4B455947;
-                    final String keyguardPackage = getString(
-                            com.android.internal.R.string.config_keyguardPackage);
-                    int userId = ActivityManager.getCurrentUser();
-                    mAppWidgetId = AppWidgetHost.allocateAppWidgetIdForPackage(KEYGUARD_HOST_ID,
-                            userId, keyguardPackage);
+                    mAppWidgetId = AppWidgetHost.allocateAppWidgetIdForSystem(KEYGUARD_HOST_ID);
                 }
                 mAppWidgetManager.bindAppWidgetId(
                         mAppWidgetId, intent.getComponent(), mExtraConfigureOptions);
@@ -590,8 +579,7 @@ public class KeyguardAppWidgetPickActivity extends Activity
             } else {
                 if (mAddingToKeyguard &&
                         mAppWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-                    int userId = ActivityManager.getCurrentUser();
-                    AppWidgetHost.deleteAppWidgetIdForSystem(mAppWidgetId, userId);
+                    AppWidgetHost.deleteAppWidgetIdForSystem(mAppWidgetId);
                 }
                 finishDelayedAndShowLockScreen(AppWidgetManager.INVALID_APPWIDGET_ID);
             }

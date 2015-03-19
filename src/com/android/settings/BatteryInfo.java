@@ -22,7 +22,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.BatteryManager;
-import android.os.BatteryStats;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IPowerManager;
@@ -64,12 +63,11 @@ public class BatteryInfo extends Activity {
 
     /**
      * Format a number of tenths-units as a decimal string without using a
-     * conversion to float.  E.g. 347 -> "34.7", -99 -> "-9.9"
+     * conversion to float.  E.g. 347 -> "34.7"
      */
     private final String tenthsToFixedString(int x) {
         int tens = x / 10;
-        // use Math.abs to avoid "-9.-9" about -99
-        return Integer.toString(tens) + "." + Math.abs(x - 10 * tens);
+        return Integer.toString(tens) + "." + (x - 10 * tens);
     }
 
    /**
@@ -164,8 +162,7 @@ public class BatteryInfo extends Activity {
         mUptime = (TextView) findViewById(R.id.uptime);
         
         // Get awake time plugged in and on battery
-        mBatteryStats = IBatteryStats.Stub.asInterface(ServiceManager.getService(
-                BatteryStats.SERVICE_NAME));
+        mBatteryStats = IBatteryStats.Stub.asInterface(ServiceManager.getService("batteryinfo"));
         mScreenStats = IPowerManager.Stub.asInterface(ServiceManager.getService(POWER_SERVICE));
         mHandler.sendEmptyMessageDelayed(EVENT_TICK, 1000);
         

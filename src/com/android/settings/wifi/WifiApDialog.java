@@ -32,7 +32,6 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.android.settings.R;
 
@@ -50,8 +49,6 @@ public class WifiApDialog extends AlertDialog implements View.OnClickListener,
     public static final int OPEN_INDEX = 0;
     public static final int WPA_INDEX = 1;
     public static final int WPA2_INDEX = 2;
-
-    private static final int WIFI_SSID_MAX_LENGTH_BYTES = 32;
 
     private View mView;
     private TextView mSsid;
@@ -167,18 +164,6 @@ public class WifiApDialog extends AlertDialog implements View.OnClickListener,
         }
     }
 
-    // If the ssid size is beyond 32 bytes, limit the input.
-    private void LimitSsidLength(Editable editable) {
-        int editEnd = mSsid.getSelectionEnd();
-        int strlength = mSsid.getText().toString().getBytes().length;
-
-        if (strlength > WIFI_SSID_MAX_LENGTH_BYTES) {
-            editable.delete(editEnd - 1, editEnd);
-            Toast.makeText(getContext(), R.string.wifi_ssid_input_limit,
-                    Toast.LENGTH_SHORT).show();
-        }
-    }
-
     public void onClick(View view) {
         mPassword.setInputType(
                 InputType.TYPE_CLASS_TEXT | (((CheckBox) view).isChecked() ?
@@ -194,10 +179,6 @@ public class WifiApDialog extends AlertDialog implements View.OnClickListener,
 
     public void afterTextChanged(Editable editable) {
         validate();
-
-        if (mSsid.getEditableText() == editable) {
-            LimitSsidLength(editable);
-        }
     }
 
     @Override

@@ -23,15 +23,10 @@ import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.app.Activity;
 import android.app.PendingIntent;
-import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.os.UserManager;
 import android.util.Log;
-import android.widget.Toast;
 
-import com.android.settings.R;
 import com.android.settings.Utils;
 
 import java.io.IOException;
@@ -63,7 +58,6 @@ public class AddAccountSettings extends Activity {
      * application.
      */
     private static final String KEY_CALLER_IDENTITY = "pendingIntent";
-    private static final String SHOULD_NOT_RESOLVE = "SHOULDN'T RESOLVE!";
 
     private static final String TAG = "AccountSettings";
 
@@ -77,8 +71,7 @@ public class AddAccountSettings extends Activity {
 
     private PendingIntent mPendingIntent;
 
-    private final AccountManagerCallback<Bundle> mCallback = new AccountManagerCallback<Bundle>() {
-        @Override
+    private AccountManagerCallback<Bundle> mCallback = new AccountManagerCallback<Bundle>() {
         public void run(AccountManagerFuture<Bundle> future) {
             boolean done = true;
             try {
@@ -127,14 +120,6 @@ public class AddAccountSettings extends Activity {
             if (Log.isLoggable(TAG, Log.VERBOSE)) Log.v(TAG, "restored");
         }
 
-        final UserManager um = (UserManager) getSystemService(Context.USER_SERVICE);
-        if (um.hasUserRestriction(UserManager.DISALLOW_MODIFY_ACCOUNTS)) {
-            // We aren't allowed to add an account.
-            Toast.makeText(this, R.string.user_cannot_add_accounts_message, Toast.LENGTH_LONG)
-                    .show();
-            finish();
-            return;
-        }
         if (mAddAccountCalled) {
             // We already called add account - maybe the callback was lost.
             finish();
@@ -177,7 +162,6 @@ public class AddAccountSettings extends Activity {
         }
     }
 
-    @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putBoolean(KEY_ADD_CALLED, mAddAccountCalled);
@@ -186,21 +170,7 @@ public class AddAccountSettings extends Activity {
 
     private void addAccount(String accountType) {
         Bundle addAccountOptions = new Bundle();
-        /*
-         * The identityIntent is for the purposes of establishing the identity
-         * of the caller and isn't intended for launching activities, services
-         * or broadcasts.
-         *
-         * Unfortunately for legacy reasons we still need to support this. But
-         * we can cripple the intent so that 3rd party authenticators can't
-         * fill in addressing information and launch arbitrary actions.
-         */
-        Intent identityIntent = new Intent();
-        identityIntent.setComponent(new ComponentName(SHOULD_NOT_RESOLVE, SHOULD_NOT_RESOLVE));
-        identityIntent.setAction(SHOULD_NOT_RESOLVE);
-        identityIntent.addCategory(SHOULD_NOT_RESOLVE);
-
-        mPendingIntent = PendingIntent.getBroadcast(this, 0, identityIntent, 0);
+        mPendingIntent = PendingIntent.getBroadcast(this, 0, new Intent(), 0);
         addAccountOptions.putParcelable(KEY_CALLER_IDENTITY, mPendingIntent);
         addAccountOptions.putBoolean(EXTRA_HAS_MULTIPLE_USERS, Utils.hasMultipleUsers(this));
         AccountManager.get(this).addAccount(
