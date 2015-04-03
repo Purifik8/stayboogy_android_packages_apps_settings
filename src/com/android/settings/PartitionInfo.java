@@ -62,11 +62,11 @@ mDataPartSize = (Preference) prefSet.findPreference(DATA_PART_SIZE);
 mCachePartSize = (Preference) prefSet.findPreference(CACHE_PART_SIZE);
 mSDCardPartFATSize = (Preference) prefSet.findPreference(SDCARDFAT_PART_SIZE);
 mSDCardPartEXTSize = (Preference) prefSet.findPreference(SDCARDEXT_PART_SIZE);
-if (fileExists("/dev/block/mmcblk0p2") == true) {
-Log.i(TAG, "sd: ext partition mounted");
+if (fileExists("/dev/block/mmcblk0p1") == true) {
+Log.i(TAG, "external sdcard mounted");
 extfsIsMounted = true;
 } else {
-Log.i(TAG, "sd: ext partition not mounted");
+Log.i(TAG, "external sdcard not mounted");
 }
 try {
 mSystemPartSize.setSummary(ObtainFSPartSize ("/system"));
@@ -74,7 +74,7 @@ mDataPartSize.setSummary(ObtainFSPartSize ("/data"));
 mCachePartSize.setSummary(ObtainFSPartSize ("/cache"));
 mSDCardPartFATSize.setSummary(ObtainFSPartSize ("/storage/sdcard0"));
 if (extfsIsMounted == true) {
-mSDCardPartEXTSize.setSummary(ObtainFSPartSize ("/sd-ext"));
+mSDCardPartEXTSize.setSummary(ObtainFSPartSize ("/storage/sdcard1"));
 } else {
 mSDCardPartEXTSize.setEnabled(false);
 }
